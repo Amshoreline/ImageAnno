@@ -1,0 +1,1494 @@
+<template>
+    <div id='test' >
+        <div id='status' style='width:800px;height:52px;position:absolute;top:12px;left:132px;' align='center'></div>
+        <div id='function_block' style='width:116px;position:absolute;top:64px;left:16px;' align='center'>
+            <button class='button' id='add'>添加标注</button>
+            <button class='button' id='undo'>回退一步</button>
+            <button class='button' id='close'>完成标注</button>
+            <button class='button' id='quit'>退出标注</button>
+            <button class='button' id='delete'>删除标注</button>
+            <button class='button' id='insert'>增加顶点</button>
+            <button class='button' id='pop'>删除顶点</button>
+            <button class='button' id='save'>保存标注</button>
+            <button class='button' id='region'>放大</button>
+            <button class='button' id='reset'>重置</button>
+            <input class='button' type='button' value='上传图片' onclick="document.getElementById('upload').click()">
+            <input class='button' type='button' value='上传标注' onclick="document.getElementById('upload_json').click()">
+            <input type="file" id="upload" accept="image/png, image/jpeg" name="upload" style="display:none" readonly/>
+            <input type="file" id="upload_json" accept="application/json" name="upload_json" style="display:none" readonly/>
+            <button class='button' id='rename'>重命名</button>
+            <button class='button' id='remove'>删除图片</button>
+            <button class='button' id='instruct'>使用说明</button>
+        </div>
+        <div id='canvas' style='width:800px;height:800px;position:absolute;top:64px;left:132px;' align='center'>
+            <canvas id='bg' width=768 height=768></canvas>
+        </div>
+        <div id='selecter_block' style='width:384px;position:absolute;top:64px;left:932px;' align='left'>
+            <label class='text'>选择目录</label>
+            <select id='collection_selecter' class='up_selecter'>
+                <option value="medical.png">medical</option>
+            </select>
+            <br>
+            <label class='text'>选择文件</label>
+            <select id='image_selecter' class='up_selecter'>
+                <option value="medical.png">medical</option>
+            </select>
+            <br>
+            <label class='text'>分辨率比例</label>
+            &nbsp;
+            <select id='ratio_selecter' class='range'>
+                <option value=0.25>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;0.25</option>
+                <option value=0.5>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;0.5</option>
+                <option value=1>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;1.0</option>
+                <option value=2>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.0</option>
+                <option value=4>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;4.0</option>
+            </select>
+            <br>
+            <label class='text'>滑动选择图片</label>
+            <input class='range' type='range' id="select_image" min="0" max="100" />
+            <br>
+            <button class='button' id='prev'>上一张图</button>
+            <br>
+            <button class='button' id='next'>下一张图</button>
+            <br>
+            <button class='big_button' id='prev_json'>导入前一个标注</button>
+            <br>
+            <button class='big_button' id='next_json'>导入后一个标注</button>
+            
+            <br>
+            <button class='button' id='bbox_pred'>Predict</button>
+            <br>
+            <label class='text'>Polygon compression force</label>
+            &nbsp;
+            <input class='text' type='range' id="comp_force" min="0" max="100" />
+        </div>
+        <div id='debug_block' style='width:384px;position:absolute;top:512px;left:932px;' align='center'></div>
+        <!-- <img :src='image_url' /> -->
+    </div>
+</template>
+
+<script lang='ts'>
+import { Component, Prop, Vue } from 'vue-property-decorator'
+
+// Tools and functions
+import axios from 'axios'
+declare const Buffer: any
+
+
+function min(a: number, b: number) {
+    return a < b ? a : b
+}
+
+function max(a: number, b: number) {
+    return a > b ? a : b
+}
+
+let backend_address: string = 'http://162.105.89.48:8001'
+
+let collection_name: string = ''   // collection name
+
+// Block right
+function blockright(oEvent: any) {
+    if (window.event) {
+        oEvent = window.event
+        oEvent.returnValue = false
+    } else {
+        oEvent.preventDefault()
+    }
+}
+window.onload = () => {document.oncontextmenu = blockright}
+
+// The main class
+@Component
+export default class Test extends Vue {
+    collection_selecter: any    // collection_selecter component
+    image_selecter: any     // image_selecter component
+    ratio_selecter: any     // ratio_selecter component
+    status: any             // status component
+    bg: any                 // bg component
+    context: any            // context component
+    image_name: string = '' // image name
+    image_ratio: number = 1 // image ratio
+    image = new Image()     // 'image' instance
+    image_url = '233'       // filename
+    annotations: any        // a list of dict
+    annotation: any         // a dict
+    drag_index: number = -1 // index of the selected annotation
+    point_idx: number = 0   // index of the selected point
+    region_info: any = {}   // information of selected region
+    image_list: any = []    // image list
+    collection_list: any = []   // collection list
+    bbox: any = {}          // bounding box for prediction
+    detaildiv: any          // Detail Div
+    debugdiv: any           // Debug Div
+
+    // two-dimentional arrays
+    anno_idx_map: any
+    is_bbox_map: any
+    path_idx_map: any
+    center_map: any
+
+    // function modes
+    drag_mode: boolean = false          // drag points
+    drag_bbox: boolean = false          // are you dragging a bbox now?
+    draw_bbox_mode: boolean = false     // draw a bbox
+    draw_polygon_mode: boolean = false  // draw a polygon
+    delete_mode: boolean = false        // delete an annotation
+    pop_mode: boolean = false           // pop a point from a polygon
+    insert_mode: boolean = false        // insert a point into a polygon
+    region_mode: boolean = false        // select a region
+    selecting: boolean = false          // selecting a region
+    bbox_pred_mode: boolean = false
+
+    point_size = 3          // size of a point
+    line_width = 2          // size of line
+    // fill_style = '#6666ff'      // color of points
+    fill_style = '#FF6600'
+    // stroke_style = '#ff0033'    // color of lines
+    stroke_style = '#FF9933'
+
+    upload_button: any          // upload_button
+    upload_json_button: any     // upload_json_button
+    comp_force_range: any
+    adjust_force_range: any
+    select_image_range: any
+
+    // descriptions for all of the modes
+    descriptions = {
+        'drag_mode': '拖拽：鼠标点击任意顶点进行拖拽',
+        'draw_bbox_mode': '添加标注：第一步，绘制矩形框',
+        'draw_polygon_mode': '添加标注：第二步，绘制多边形',
+        'delete_mode': '删除标注：通过点击任意顶点可以删除指定标注',
+        'pop_mode': '删除顶点：通过点击任意多边形顶点删除指定顶点',
+        'insert_mode': '增加顶点：通过点击任意多边形顶点在附近增加顶点',
+        'region_mode': '放大：绘制矩形框以指定放大区域',
+        'bbox_pred_mode': 'Predict mode: you can draw a bbox to ask ML-program for a predicted result',
+    }
+
+    bboxPredict() {
+        console.log('Get bbox prediction')
+        axios
+            .post(
+                backend_address + '/get_pred',
+                {
+                    'collection_name': collection_name,
+                    'image_name': this.image_name,
+                    'bbox': this.bbox,
+                    'compress_degree': parseInt(this.comp_force_range.value, 10),
+                },
+            )
+            .then(response => {
+                this.annotations.push(
+                    {
+                        'bbox': this.bbox,
+                        'path': response.data,
+                    },
+                )
+                this.annotation = {
+                    'bbox': this.bbox,
+                    'path': response.data,
+                }
+            })
+            .catch(error => {
+                console.log(error)
+            })
+            .finally(() => {})
+    }
+
+    resetRegion() {
+        this.region_info = {
+            'xmin': 0, 'ymin': 0, 'width': this.image.width / this.image_ratio,
+            'height': this.image.height / this.image_ratio,
+            'ratio': min(
+                this.bg.height / (this.image.height / this.image_ratio),
+                this.bg.width / (this.image.width / this.image_ratio),
+            ),
+        }
+        console.log('Reset region')
+        console.log('bg.height = ', this.bg.height, '; bg.width = ', this.bg.width)
+        console.log('image.height = ', this.image.height, '; image.width = ', this.image.width)
+        console.log('region_info = ', this.region_info['ratio'])
+    }
+
+    checkNode(xmin: number, ymin: number) {
+        return (
+            xmin >= 0 && xmin < this.region_info['width'] * this.region_info['ratio']
+            && ymin >= 0 && ymin < this.region_info['height'] * this.region_info['ratio']
+        )
+    }
+
+    // Overwritten functions
+    // x => (x - region_info['xmin']) * region_info['ratio']
+    // y => (y - region_info['ymin']) * region_info['ratio']
+    // width => width * region_info['ratio']
+    // height => height * region_info['ratio']
+    strokeRect(xmin: number, ymin: number, width: number, height: number) {
+        xmin = (xmin - this.region_info['xmin']) * this.region_info['ratio']
+        ymin = (ymin - this.region_info['ymin']) * this.region_info['ratio']
+        width = width * this.region_info['ratio']
+        height = height * this.region_info['ratio']
+        if (this.checkNode(xmin, ymin)) {
+            this.context.strokeRect(xmin, ymin, width, height)
+        }
+    }
+
+    fillRect(xmin: number, ymin: number, width: number, height: number) {
+        xmin = (xmin - this.region_info['xmin']) * this.region_info['ratio']
+        ymin = (ymin - this.region_info['ymin']) * this.region_info['ratio']
+        width = width * this.region_info['ratio']
+        height = height * this.region_info['ratio']
+        if (this.checkNode(xmin, ymin)) {
+            this.context.fillRect(xmin, ymin, width, height)
+        }
+    }
+
+    checkPath(path: any) {
+        let flag: boolean = true
+        let xmin: number
+        let ymin: number
+        for (let j = 0; j < path.length; j++) {
+            xmin = (path[j]['x'] - this.region_info['xmin']) * this.region_info['ratio']
+            ymin = (path[j]['y'] - this.region_info['ymin']) * this.region_info['ratio']
+            if (!this.checkNode(xmin, ymin)) {
+                flag = false
+                break
+            }
+        }
+        return flag
+    }
+
+    moveTo(x: number, y: number) {
+        x = (x - this.region_info['xmin']) * this.region_info['ratio']
+        y = (y - this.region_info['ymin']) * this.region_info['ratio']
+        this.context.moveTo(x, y)
+    }
+
+    lineTo(x: number, y: number) {
+        x = (x - this.region_info['xmin']) * this.region_info['ratio']
+        y = (y - this.region_info['ymin']) * this.region_info['ratio']
+        this.context.lineTo(x, y)
+    }
+
+    maskAllModes() {
+        // mode flags
+        this.draw_bbox_mode = false
+        this.draw_polygon_mode = false
+        this.drag_mode = false
+        this.delete_mode = false
+        this.pop_mode = false
+        this.insert_mode = false
+        this.region_mode = false
+        this.bbox_pred_mode = false
+        // other flags
+        this.drag_bbox = false
+        this.selecting = false
+        this.status.innerHTML = this.descriptions['drag_mode']
+    }
+
+    checkAllModes() {
+        // return !(
+        //     this.draw_bbox_mode || this.draw_polygon_mode || this.drag_mode
+        //     || this.delete_mode || this.pop_mode
+        //     || this.insert_mode || this.region_mode
+        // )
+        return !(
+            this.draw_bbox_mode || this.draw_polygon_mode
+            || this.region_mode
+        )
+    }
+
+    clearCanvas() {
+        this.bg.height = this.bg.height // clear the canvas, does not it novel?
+        this.context.fillStyle = this.fill_style
+        this.context.strokeStyle = this.stroke_style
+        this.context.lineWidth = this.line_width
+    }
+
+    drawImageAnno() {
+        this.clearCanvas()
+        // console.log(this.region_info)
+        this.context.drawImage(
+            this.image,
+            this.region_info['xmin'] * this.image_ratio, this.region_info['ymin'] * this.image_ratio,
+            this.region_info['width'] * this.image_ratio, this.region_info['height'] * this.image_ratio,
+            0, 0, this.region_info['width'] * this.region_info['ratio'],
+            this.region_info['height'] * this.region_info['ratio'],
+        )
+        for (let i = 0; i < this.annotations.length; i++) {
+            let annotation: any = this.annotations[i]
+            this.strokeRect(
+                annotation['bbox']['xmin'],
+                annotation['bbox']['ymin'],
+                annotation['bbox']['width'],
+                annotation['bbox']['height'],
+            )
+            if (this.checkPath(annotation['path'])) {
+                this.moveTo(
+                    annotation['path'][0]['x'],
+                    annotation['path'][0]['y'],
+                )
+                for (let j = 1; j < annotation['path'].length; j++) {
+                    this.lineTo(
+                        annotation['path'][j]['x'],
+                        annotation['path'][j]['y'],
+                    )
+                }
+                this.context.closePath()
+            }
+            this.context.stroke()
+        }
+        if (this.draw_polygon_mode && 'bbox' in this.annotation) {
+            this.strokeRect(
+                this.annotation['bbox']['xmin'],
+                this.annotation['bbox']['ymin'],
+                this.annotation['bbox']['width'],
+                this.annotation['bbox']['height'],
+            )
+        }
+        if ('path' in this.annotation && this.annotation['path'].length > 0 && this.checkPath(this.annotation['path'])) {
+            this.moveTo(
+                this.annotation['path'][0]['x'],
+                this.annotation['path'][0]['y'],
+            )
+            for (let j = 1; j < this.annotation['path'].length; j++) {
+                this.lineTo(
+                    this.annotation['path'][j]['x'],
+                    this.annotation['path'][j]['y'],
+                )
+            }
+        }
+        this.drawPoints()
+    }
+
+    // TODO: Some tricks can be done to accelerate the processing
+    drawPoints() {
+        for (let i = 0; i < this.annotations.length; i++) {
+            let annotation: any = this.annotations[i]
+            this.fillRect(
+                annotation['bbox']['xmin'] - this.point_size / 2,
+                annotation['bbox']['ymin'] - this.point_size / 2,
+                this.point_size,
+                this.point_size,
+            )
+            this.fillMap(
+                annotation['bbox']['xmin'],
+                annotation['bbox']['ymin'],
+                this.point_size * 1.5, i, true, 0,
+            )
+            this.fillRect(
+                annotation['bbox']['xmin'] + annotation['bbox']['width'] - this.point_size / 2,
+                annotation['bbox']['ymin'] - this.point_size / 2,
+                this.point_size,
+                this.point_size,
+            )
+            this.fillMap(
+                annotation['bbox']['xmin'] + annotation['bbox']['width'],
+                annotation['bbox']['ymin'],
+                this.point_size * 1.5, i, true, 1,
+            )
+            this.fillRect(
+                annotation['bbox']['xmin'] + annotation['bbox']['width'] - this.point_size / 2,
+                annotation['bbox']['ymin'] + annotation['bbox']['height'] - this.point_size / 2,
+                this.point_size,
+                this.point_size,
+            )
+            this.fillMap(
+                annotation['bbox']['xmin'] + annotation['bbox']['width'],
+                annotation['bbox']['ymin'] + annotation['bbox']['height'],
+                this.point_size * 1.5, i, true, 2,
+            )
+            this.fillRect(
+                annotation['bbox']['xmin'] - this.point_size / 2,
+                annotation['bbox']['ymin'] + annotation['bbox']['height'] - this.point_size / 2,
+                this.point_size,
+                this.point_size,
+            )
+            this.fillMap(
+                annotation['bbox']['xmin'],
+                annotation['bbox']['ymin'] + annotation['bbox']['height'],
+                this.point_size * 1.5, i, true, 3,
+            )
+            for (let j = 0; j < annotation['path'].length; j++) {
+                this.fillRect(
+                    annotation['path'][j]['x'] - this.point_size / 2,
+                    annotation['path'][j]['y'] - this.point_size / 2,
+                    this.point_size,
+                    this.point_size,
+                )
+                this.fillMap(
+                    annotation['path'][j]['x'],
+                    annotation['path'][j]['y'],
+                    this.point_size * 1.5, i, false, j,
+                )
+            }
+        }
+        if (this.draw_polygon_mode && 'bbox' in this.annotation) {
+            this.fillRect(
+                this.annotation['bbox']['xmin'] - this.point_size / 2,
+                this.annotation['bbox']['ymin'] - this.point_size / 2,
+                this.point_size,
+                this.point_size,
+            )
+            this.fillRect(
+                this.annotation['bbox']['xmin'] + this.annotation['bbox']['width'] - this.point_size / 2,
+                this.annotation['bbox']['ymin'] - this.point_size / 2,
+                this.point_size,
+                this.point_size,
+            )
+            this.fillRect(
+                this.annotation['bbox']['xmin'] + this.annotation['bbox']['width'] - this.point_size / 2,
+                this.annotation['bbox']['ymin'] + this.annotation['bbox']['height'] - this.point_size / 2,
+                this.point_size,
+                this.point_size,
+            )
+            this.fillRect(
+                this.annotation['bbox']['xmin'] - this.point_size / 2,
+                this.annotation['bbox']['ymin'] + this.annotation['bbox']['height'] - this.point_size / 2,
+                this.point_size,
+                this.point_size,
+            )
+        }
+        if ('path' in this.annotation) {
+            for (let j = 0; j < this.annotation['path'].length; j++) {
+                this.fillRect(
+                    this.annotation['path'][j]['x'] - this.point_size / 2,
+                    this.annotation['path'][j]['y'] - this.point_size / 2,
+                    this.point_size,
+                    this.point_size,
+                )
+            }
+        }
+    }
+
+    readJson(image_name: string) {
+        axios
+            .post(backend_address + '/get_anno', {'collection_name': collection_name, 'image_name': image_name})
+            .then(response => {
+                console.log('readJson', image_name)
+                this.annotations = response.data
+                this.annotation = {}
+                this.initialize()
+                this.drawImageAnno()
+            })
+            .catch(error => {
+                console.log(error)
+                this.annotations = []
+                this.annotation = {}
+                this.initialize()
+                this.drawImageAnno()
+            })
+            .finally(() => {})
+    }
+
+    readImage() {
+        console.log('readImage', this.image_name)
+        axios
+            .post(backend_address + '/get_image', {'collection_name': collection_name, 'image_name': this.image_name, 'image_ratio': this.image_ratio})
+            .then(response => {
+                // let encryptedBytes = Buffer.from(response.data)
+                let encryptedBytes = response.data
+                this.image_url = 'data:image/jpeg;base64,' + encryptedBytes.toString('base64')
+                this.image.src = this.image_url
+                this.readJson(this.image_name)
+            })
+            .catch(error => {
+                console.log(error)
+            })
+            .finally(() => {})
+    }
+
+    // update '<select>'
+    updateCollectionSelecter() {
+        let match_index = 0
+        // update collection selecter
+        this.collection_selecter.length = 0
+        for (let item_name of this.collection_list) {
+            let option = document.createElement("option")
+            option.value = item_name
+            option.text = item_name
+            this.collection_selecter.add(option, null)
+        }
+        for (let i = 0; i < this.collection_selecter.length; i++) {
+            if (this.collection_selecter.options[i].value == collection_name) {
+                match_index = i
+                break
+            }
+        }
+        this.collection_selecter.selectedIndex = match_index
+        collection_name = this.collection_selecter.options[this.collection_selecter.selectedIndex].value
+    }
+
+    updateImageSelecter() {
+        // update image selecter
+        let match_index = 0
+        this.image_selecter.length = 0
+        for (let image_info of this.image_list) {
+            let option = document.createElement("option")
+            option.value = image_info['image_name']
+            option.text = image_info['image_name']
+            this.image_selecter.add(option, null)
+        }
+        for (let i = 0; i < this.image_selecter.length; i++) {
+            if (this.image_selecter.options[i].value == this.image_name) {
+                match_index = i
+                break
+            }
+        }
+        this.image_selecter.selectedIndex = match_index
+        this.image_name = this.image_selecter.options[this.image_selecter.selectedIndex].value
+        // Read image
+        this.readImage()
+    }
+
+    nextJson() {
+        axios
+            .post(backend_address + '/next_json', {'collection_name': collection_name, 'image_name': this.image_name})
+            .then(response => {
+                this.readImage()
+            })
+            .catch(error => {
+                console.log(error)
+            })
+            .finally(() => {})
+        this.readImage()
+    }
+
+    prevJson() {
+        axios
+            .post(backend_address + '/prev_json', {'collection_name': collection_name, 'image_name': this.image_name})
+            .then(response => {
+                this.readImage()
+            })
+            .catch(error => {
+                console.log(error)
+            })
+            .finally(() => {})
+        this.readImage()
+    }
+
+
+    nextImage() {
+        let cur_idx = parseInt(this.select_image_range.value, 10)
+        if (cur_idx < this.select_image_range.max) {
+            cur_idx = cur_idx + 1
+        }
+        this.select_image_range.value = cur_idx
+        this.image_selecter.selectedIndex = cur_idx
+        this.image_name = this.image_selecter.options[cur_idx].value
+        this.readImage()
+    }
+
+    prevImage() {
+        let cur_idx = parseInt(this.select_image_range.value, 10)
+        if (cur_idx > this.select_image_range.min) {
+            cur_idx = cur_idx - 1
+        }
+        this.select_image_range.value = cur_idx
+        this.image_selecter.selectedIndex = cur_idx
+        this.image_name = this.image_selecter.options[cur_idx].value
+        this.readImage()
+    }
+
+    onSelectImageChange(e: any) {
+        this.image_selecter.selectedIndex = parseInt(this.select_image_range.value, 10)
+        this.image_name = this.image_selecter.options[this.image_selecter.selectedIndex].value
+        this.readImage()
+    }
+
+    onSelectImageMove(e: any) {
+        this.detaildiv.innerHTML = this.select_image_range.value
+        this.detaildiv.style.width = 12 + 12 * this.detaildiv.innerHTML.length + 'px'
+        // console.log(this.annotations[this.anno_idx_map[y][x]])
+        this.detaildiv.style.display = ''
+        this.detaildiv.style.left = e.clientX + 16 + 'px'
+        this.detaildiv.style.top = e.clientY + 16 + "px"
+    }
+
+    onSelectImageOut(e: any) {
+        this.detaildiv.style.display = 'none'
+    }
+
+    onCollectionChange(e: any) {
+        collection_name = this.collection_selecter.options[this.collection_selecter.selectedIndex].value
+        this.image_name = ''
+        this.readImageList()
+    }
+
+    onImageChange(e: any) {
+        this.image_name = this.image_selecter.options[this.image_selecter.selectedIndex].value
+        this.select_image_range.value = this.image_selecter.selectedIndex
+        this.readImage()
+    }
+
+    onRatioChange(e: any) {
+        this.image_ratio = this.ratio_selecter.options[this.ratio_selecter.selectedIndex].value
+        this.readImage()
+    }
+
+    readCollectionList() {
+        console.log('Get collection list')
+        axios
+            .post(backend_address + '/get_collection_list', {})
+            .then(response => {
+                this.collection_list = response.data
+                this.updateCollectionSelecter()
+                this.readImageList()
+            })
+            .catch(error => {
+                console.log(error)
+            })
+            .finally(() => {})
+    }
+
+    readImageList() {
+        console.log('Get image list in collection:', collection_name)
+        axios
+            .post(backend_address + '/get_image_list', {'collection_name': collection_name})
+            .then(response => {
+                this.image_list = response.data
+                this.select_image_range.value = 0
+                this.select_image_range.min = 0
+                this.select_image_range.max = this.image_list.length - 1
+                this.updateImageSelecter()
+            })
+            .catch(error => {
+                console.log(error)
+            })
+            .finally(() => {})
+    }
+
+    mouseMove(e: any) {
+        this.drawImageAnno()
+        let offset_x = e.offsetX / this.region_info['ratio'] + this.region_info['xmin']
+        let offset_y = e.offsetY / this.region_info['ratio'] + this.region_info['ymin']
+        let x = parseInt(offset_x + '', 10)
+        let y = parseInt(offset_y + '', 10)
+        if (
+            x >= 0 && y >= 0 && x < this.bg.width && y < this.bg.height
+            && this.anno_idx_map[y][x] != -1
+        ) {
+            this.fillRect(
+                this.center_map[y][x][0] - this.point_size,
+                this.center_map[y][x][1] - this.point_size,
+                this.point_size * 2, this.point_size * 2,
+            )
+            this.detaildiv.innerHTML = this.annotations[this.anno_idx_map[y][x]]['label']
+            this.detaildiv.style.width = 12 + 12 * this.detaildiv.innerHTML.length + 'px'
+            // console.log(this.annotations[this.anno_idx_map[y][x]])
+            this.detaildiv.style.display = ''
+            this.detaildiv.style.left = e.clientX + 16 + 'px'
+            this.detaildiv.style.top = e.clientY + 16 + "px"
+        } else {
+            this.detaildiv.style.display = 'none'
+        }
+        if (this.draw_bbox_mode && ('bbox' in this.annotation)) {
+            let xmin = min(this.annotation['bbox']['xmin'], offset_x)
+            let xmax = max(this.annotation['bbox']['xmin'], offset_x)
+            let ymin = min(this.annotation['bbox']['ymin'], offset_y)
+            let ymax = max(this.annotation['bbox']['ymin'], offset_y)
+            this.strokeRect(
+                xmin, ymin, xmax - xmin, ymax - ymin,
+            )
+            this.fillRect(
+                xmin - this.point_size / 2, ymin - this.point_size / 2,
+                this.point_size, this.point_size,
+            )
+            this.fillRect(
+                xmax - this.point_size / 2, ymin - this.point_size / 2,
+                this.point_size, this.point_size,
+            )
+            this.fillRect(
+                xmax - this.point_size / 2, ymax - this.point_size / 2,
+                this.point_size, this.point_size,
+            )
+            this.fillRect(
+                xmin - this.point_size / 2, ymax - this.point_size / 2,
+                this.point_size, this.point_size,
+            )
+        } else if (this.draw_polygon_mode) {
+            if (this.annotation['path'].length != 0) {
+                this.lineTo(offset_x, offset_y)
+                this.context.stroke()
+                this.drawPoints()
+            }
+            if (
+                this.annotation['path'].length > 3
+                && Math.abs(offset_x - this.annotation['path'][0]['x']) < this.point_size
+                && Math.abs(offset_y - this.annotation['path'][0]['y']) < this.point_size
+            ) {
+                this.fillRect(
+                    this.annotation['path'][0]['x'] - this.point_size,
+                    this.annotation['path'][0]['y'] - this.point_size,
+                    this.point_size * 2,
+                    this.point_size * 2,
+                )
+            }
+        } else if (this.insert_mode) {
+            if (this.anno_idx_map[y][x] != -1 && !this.is_bbox_map[y][x]) {
+                let annotation = this.annotations[this.anno_idx_map[y][x]]
+                let path_idx = (this.path_idx_map[y][x] - 1 + annotation['path'].length) % annotation['path'].length
+                this.fillRect(
+                    annotation['path'][path_idx]['x'] - this.point_size,
+                    annotation['path'][path_idx]['y'] - this.point_size,
+                    this.point_size * 2, this.point_size * 2,
+                )
+            }
+        } else if (this.region_mode && this.selecting) {
+            let xmin = min(this.region_info['new_xmin'], offset_x)
+            let xmax = max(this.region_info['new_xmin'], offset_x)
+            let ymin = min(this.region_info['new_ymin'], offset_y)
+            let ymax = max(this.region_info['new_ymin'], offset_y)
+            this.strokeRect(
+                xmin, ymin, xmax - xmin, ymax - ymin,
+            )
+        } else if (this.bbox_pred_mode && ('xmin' in this.bbox)) {
+            let xmin = min(this.bbox['xmin'], offset_x)
+            let xmax = max(this.bbox['xmin'], offset_x)
+            let ymin = min(this.bbox['ymin'], offset_y)
+            let ymax = max(this.bbox['ymin'], offset_y)
+            this.strokeRect(
+                xmin, ymin, xmax - xmin, ymax - ymin,
+            )
+        } else {
+            if (this.drag_mode) {
+                if (this.drag_bbox) {
+                    if (this.point_idx == 0) {
+                        this.annotation['bbox']['width'] += this.annotation['bbox']['xmin'] - offset_x
+                        this.annotation['bbox']['height'] += this.annotation['bbox']['ymin'] - offset_y
+                        this.annotation['bbox']['xmin'] = offset_x
+                        this.annotation['bbox']['ymin'] = offset_y
+                    } else if (this.point_idx == 1) {
+                        this.annotation['bbox']['width'] = offset_x - this.annotation['bbox']['xmin']
+                        this.annotation['bbox']['height'] += this.annotation['bbox']['ymin'] - offset_y
+                        this.annotation['bbox']['ymin'] = offset_y
+                    } else if (this.point_idx == 2) {
+                        this.annotation['bbox']['width'] = offset_x - this.annotation['bbox']['xmin']
+                        this.annotation['bbox']['height'] = offset_y - this.annotation['bbox']['ymin']
+                    } else if (this.point_idx == 3) {
+                        this.annotation['bbox']['height'] = offset_y - this.annotation['bbox']['ymin']
+                        this.annotation['bbox']['width'] += this.annotation['bbox']['xmin'] - offset_x
+                        this.annotation['bbox']['xmin'] = offset_x
+                    }
+                } else {
+                    this.annotation['path'][this.point_idx]['x'] = offset_x
+                    this.annotation['path'][this.point_idx]['y'] = offset_y
+                }
+            }
+        }
+    }
+
+    mouseDown(e: any) {
+        console.log(e.button, e.buttons)
+        if (e.button == 2) {
+            this.operate('c')
+            return
+        }
+        if (
+            e.offsetX < 0 || e.offsetX >= this.region_info['width'] * this.region_info['ratio'] || e.offsetY < 0
+            || e.offsetY >= this.region_info['height'] * this.region_info['ratio']
+        ) {
+            console.log('out')
+            return
+        }
+        let offset_x = e.offsetX / this.region_info['ratio'] + this.region_info['xmin']
+        let offset_y = e.offsetY / this.region_info['ratio'] + this.region_info['ymin']
+        let x = parseInt(offset_x + '', 10)
+        let y = parseInt(offset_y + '', 10)
+        if (this.draw_bbox_mode && !('bbox' in this.annotation)) {
+            this.annotation = {
+                'bbox': {
+                    'xmin': offset_x,
+                    'ymin': offset_y,
+                },
+                'path': [],
+            }
+        } else if (this.draw_bbox_mode && ('bbox' in this.annotation)) {
+            this.maskAllModes()
+            this.draw_polygon_mode = true
+            this.status.innerHTML = this.descriptions['draw_polygon_mode']
+            let xmin = min(this.annotation['bbox']['xmin'], offset_x)
+            let xmax = max(this.annotation['bbox']['xmin'], offset_x)
+            let ymin = min(this.annotation['bbox']['ymin'], offset_y)
+            let ymax = max(this.annotation['bbox']['ymin'], offset_y)
+            this.annotation['bbox']['xmin'] = xmin
+            this.annotation['bbox']['ymin'] = ymin
+            this.annotation['bbox']['width'] = xmax - xmin
+            this.annotation['bbox']['height'] = ymax - ymin
+            this.strokeRect(
+                xmin, ymin, xmax - xmin, ymax - ymin,
+            )
+            this.fillRect(
+                xmin - this.point_size / 2, ymin - this.point_size / 2,
+                this.point_size, this.point_size,
+            )
+            this.fillRect(
+                xmax - this.point_size / 2, ymin - this.point_size / 2,
+                this.point_size, this.point_size,
+            )
+            this.fillRect(
+                xmax - this.point_size / 2, ymax - this.point_size / 2,
+                this.point_size, this.point_size,
+            )
+            this.fillRect(
+                xmin - this.point_size / 2, ymax - this.point_size / 2,
+                this.point_size, this.point_size,
+            )
+        } else if (this.draw_polygon_mode) {
+            if (
+                this.annotation['path'].length > 2
+                && Math.abs(offset_x - this.annotation['path'][0]['x']) < this.point_size
+                && Math.abs(offset_y - this.annotation['path'][0]['y']) < this.point_size
+            ) {
+                // Finish annotation
+                this.maskAllModes()
+                this.context.closePath()
+                this.context.stroke()
+                this.drawPoints()
+                let anno_label = prompt('请输入当前标注的标签')
+                this.annotation['label'] = anno_label
+                this.annotations.push(this.annotation)
+                this.annotation = {}
+            } else if (this.annotation['path'].length == 0) {
+                this.annotation['path'].push({
+                    'x': offset_x,
+                    'y': offset_y,
+                })
+                this.moveTo(offset_x, offset_y)
+            } else {
+                this.annotation['path'].push({
+                    'x': offset_x,
+                    'y': offset_y,
+                })
+                this.lineTo(offset_x, offset_y)
+                this.context.stroke()
+                this.drawPoints()
+            }
+        } else if (this.delete_mode) {
+            if (this.anno_idx_map[y][x] != -1) {
+                console.log('delete')
+                this.annotations.splice(this.anno_idx_map[y][x], 1)
+                this.maskAllModes()
+                this.annotation = {}
+                this.drawImageAnno()
+            }
+        } else if (this.insert_mode) {
+            if (this.anno_idx_map[y][x] != -1 && !this.is_bbox_map[y][x]) {
+                console.log('adding point')
+                this.maskAllModes()
+                this.drag_mode = true
+                this.annotation = this.annotations[this.anno_idx_map[y][x]]
+                this.drag_bbox = this.is_bbox_map[y][x]
+                this.point_idx = this.path_idx_map[y][x]
+                this.annotation['path'].splice(this.point_idx, 0, {'x': x, 'y': y})
+            }
+        } else if (this.pop_mode) {
+            if (this.anno_idx_map[y][x] != -1 && !this.is_bbox_map[y][x]) {
+                let annotation = this.annotations[this.anno_idx_map[y][x]]
+                if (annotation['path'].length > 3) {
+                    annotation['path'].splice(this.path_idx_map[y][x], 1)
+                }
+                this.maskAllModes()
+            }
+        } else if (this.region_mode) {
+            if (!this.selecting) {
+                this.selecting = true
+                this.region_info['new_xmin'] = offset_x
+                this.region_info['new_ymin'] = offset_y
+            } else {
+                this.maskAllModes()
+                let xmin = min(this.region_info['new_xmin'], offset_x)
+                let xmax = max(this.region_info['new_xmin'], offset_x)
+                let ymin = min(this.region_info['new_ymin'], offset_y)
+                let ymax = max(this.region_info['new_ymin'], offset_y)
+                this.region_info['xmin'] = xmin
+                this.region_info['ymin'] = ymin
+                this.region_info['width'] = xmax - xmin
+                this.region_info['height'] = ymax - ymin
+                this.region_info['ratio'] = min(
+                    this.bg.width / this.region_info['width'],
+                    this.bg.height / this.region_info['height'],
+                )
+            }
+            // console.log(this.region_info)
+        } else if (this.bbox_pred_mode) {
+            if (!('xmin' in this.bbox)) {
+                this.bbox['xmin'] = offset_x
+                this.bbox['ymin'] = offset_y
+            } else {
+                let xmin = min(this.bbox['xmin'], offset_x)
+                let xmax = max(this.bbox['xmin'], offset_x)
+                let ymin = min(this.bbox['ymin'], offset_y)
+                let ymax = max(this.bbox['ymin'], offset_y)
+                this.bbox['xmin'] = xmin
+                this.bbox['ymin'] = ymin
+                this.bbox['width'] = xmax - xmin
+                this.bbox['height'] = ymax - ymin
+                this.bbox_pred_mode = false
+                this.bboxPredict()
+                this.maskAllModes()
+            }
+        } else {
+            if (!this.drag_mode) {
+                if (this.anno_idx_map[y][x] != -1) {
+                    console.log('drag_mode')
+                    this.drag_mode = true
+                    this.drag_index = this.anno_idx_map[y][x]
+                    this.annotation = this.annotations[this.drag_index]
+                    this.drag_bbox = this.is_bbox_map[y][x]
+                    this.point_idx = this.path_idx_map[y][x]
+                }
+            } else {
+                this.drag_mode = false
+                if (this.drag_bbox) {
+                    if (this.point_idx == 0) {
+                        this.annotation['bbox']['width'] += this.annotation['bbox']['xmin'] - offset_x
+                        this.annotation['bbox']['height'] += this.annotation['bbox']['ymin'] - offset_y
+                        this.annotation['bbox']['xmin'] = offset_x
+                        this.annotation['bbox']['ymin'] = offset_y
+                    } else if (this.point_idx == 1) {
+                        this.annotation['bbox']['width'] = offset_x - this.annotation['bbox']['xmin']
+                        this.annotation['bbox']['height'] += this.annotation['bbox']['ymin'] - offset_y
+                        this.annotation['bbox']['ymin'] = offset_y
+                    } else if (this.point_idx == 2) {
+                        this.annotation['bbox']['width'] = offset_x - this.annotation['bbox']['xmin']
+                        this.annotation['bbox']['height'] = offset_y - this.annotation['bbox']['ymin']
+                    } else if (this.point_idx == 3) {
+                        this.annotation['bbox']['height'] = offset_y - this.annotation['bbox']['ymin']
+                        this.annotation['bbox']['width'] += this.annotation['bbox']['xmin'] - offset_x
+                        this.annotation['bbox']['xmin'] = offset_x
+                    }
+                } else {
+                    this.annotation['path'][this.point_idx]['x'] = offset_x
+                    this.annotation['path'][this.point_idx]['y'] = offset_y
+                }
+            }
+        }
+        this.reinitializeMaps()
+    }
+
+    mouseUp(e: any) {
+    }
+
+    operate(key: string) {
+        console.log('key', key)
+        switch (key) {
+            case 'a':
+                if (this.checkAllModes()) {
+                    this.draw_bbox_mode = true
+                    this.annotation = {}
+                    this.status.innerHTML = this.descriptions['draw_bbox_mode']
+                }
+                break
+            case 'b':
+                if (this.checkAllModes()) {
+                    console.log('bbox pred')
+                    this.bbox_pred_mode = true
+                    this.bbox = {}
+                    this.status.innerHTML = this.descriptions['bbox_pred_mode']
+                }
+                break
+            case 'c':
+                if (
+                    this.draw_polygon_mode && 'path' in this.annotation
+                    && this.annotation['path'].length > 2
+                ) {
+                    this.maskAllModes()
+                    this.context.closePath()
+                    this.context.stroke()
+                    this.drawPoints()
+                    let anno_label = prompt('请输入当前标注的标签')
+                    this.annotation['label'] = anno_label
+                    this.annotations.push(this.annotation)
+                    this.annotation = {}
+                }
+                break
+            case 'd':
+                if (this.checkAllModes()) {
+                    this.delete_mode = true
+                    this.status.innerHTML = this.descriptions['delete_mode']
+                }
+                this.drawImageAnno()
+                break
+            case 'f':
+                break
+                axios
+                    .post(
+                        backend_address + '/finetune',
+                        {'collection_name': collection_name, 'image_name': this.image_name},
+                    )
+                    .then(response => {
+                        this.annotations.push(
+                            {
+                                'bbox': this.bbox,
+                                'path': response.data,
+                            },
+                        )
+                    })
+                    .catch(error => {
+                        console.log(error)
+                    })
+                break
+            case 'i':
+                if (this.checkAllModes()) {
+                    this.insert_mode = true
+                    this.status.innerHTML = this.descriptions['insert_mode']
+                }
+                break
+            case 'p':
+                if (this.checkAllModes()) {
+                    this.pop_mode = true
+                    this.status.innerHTML = this.descriptions['pop_mode']
+                }
+                break
+            case 'q':
+                if (this.draw_bbox_mode || this.draw_polygon_mode) {
+                    this.maskAllModes()
+                    this.annotation = {}
+                    this.drawImageAnno()
+                } else {
+                // } else if (
+                //     this.region_mode || this.delete_mode || this.insert_mode
+                //     || this.pop_mode || this.bbox_pred_mode
+                // ) {
+                    this.maskAllModes()
+                    this.resetRegion()
+                    this.drawImageAnno()
+                }
+                break
+            case 'r':
+                console.log('=========', this.checkAllModes())
+                if (this.checkAllModes()) {
+                    this.region_mode = true
+                    this.status.innerHTML = this.descriptions['region_mode']
+                    this.resetRegion()
+                    this.drawImageAnno()
+                }
+                break
+            case 's':
+                axios
+                    .post(
+                        backend_address + '/save_anno',
+                        {
+                            'collection_name': collection_name,
+                            'image_name': this.image_name,
+                            'anno': this.annotations,
+                        },
+                    )
+                    .then(response => {
+                        alert('保存成功')
+                    })
+                    .catch(error => {
+                        console.log(error)
+                    })
+                    .finally(() => {})
+                break
+            case 't':
+                console.log('update_pred')
+                axios
+                    .post(
+                        backend_address + '/update_pred',
+                        {
+                            'collection_name': collection_name,
+                            'image_name': this.image_name, 'anno': this.annotation,
+                            'alpha': parseInt(this.adjust_force_range.value, 10),
+                            'compress_degree': parseInt(this.comp_force_range.value, 10)},
+                    )
+                    .then(response => {
+                        this.annotations[this.drag_index]['path'] = response.data
+                    })
+                    .catch(error => {
+                        console.log('update_anno error')
+                    })
+                    .finally(() => {})
+                break
+            case 'u':
+                if (this.draw_polygon_mode) {
+                    if (this.annotation['path'].length > 0) {
+                        this.annotation['path'].pop()
+                    }
+                    this.drawImageAnno()
+                    this.context.stroke()
+                    this.drawPoints()
+                }
+                break
+            case 'z':
+                console.log('Test key "z"')
+                axios
+                    .post(
+                        backend_address + '/test', {'message': 'hello'},
+                    )
+                    .then(response => {
+                        console.log(response)
+                    })
+                    .catch(error => {
+                        console.log(error)
+                    })
+                    .finally(() => {})
+
+                break
+            default:
+        }
+        return
+        console.log('draw_bbox_mode', this.draw_bbox_mode)
+        console.log('draw_polygon_mode', this.draw_polygon_mode)
+        console.log('drag_mode', this.drag_mode)
+        console.log('delete_mode', this.delete_mode)
+        console.log('insert_mode', this.insert_mode)
+        console.log('pop_mode', this.pop_mode)
+        console.log('region_mode', this.region_mode)
+        console.log('bbox_pred_mode', this.bbox_pred_mode)
+    }
+
+    keyDown(e: any) {
+        this.operate(e.key)
+    }
+
+    scrollFunc(e: any)  {
+        e.preventDefault()
+        e = e || window.event
+        let offset_x = e.offsetX / this.region_info['ratio'] + this.region_info['xmin']
+        let offset_y = e.offsetY / this.region_info['ratio'] + this.region_info['ymin']
+        let x = parseInt(offset_x + '', 10)
+        let y = parseInt(offset_y + '', 10)
+        if (
+            x >= 0 && y >= 0 && x < this.bg.width && y < this.bg.height
+        ) {
+            if (e.wheelDelta) {
+                if (e.wheelDelta > 0) {
+                    this.nextImage()
+                }
+                if (e.wheelDelta < 0) {
+                    this.prevImage()
+                }
+            }
+        }
+    }
+
+    // Initialize context and maps
+    initialize() {
+        // These two lines will be deleted in the future
+        // this.bg.height = 1024
+        // this.bg.width = 1980
+        // Initialize region_info
+        this.resetRegion()
+        // Initialize maps
+        this.anno_idx_map = []
+        this.is_bbox_map = []
+        this.path_idx_map = []
+        this.center_map = []
+        for (let i = 0; i < this.bg.height; i++) {
+            let anno_idx_arr = []
+            let is_bbox_arr = []
+            let path_idx_arr = []
+            let center_arr = []
+            for (let j = 0; j < this.bg.width; j++) {
+                anno_idx_arr.push(-1)
+                is_bbox_arr.push(0)
+                path_idx_arr.push(-1)
+                center_arr.push([0, 0])
+            }
+            this.anno_idx_map.push(anno_idx_arr)
+            this.is_bbox_map.push(is_bbox_arr)
+            this.path_idx_map.push(path_idx_arr)
+            this.center_map.push(center_arr)
+        }
+        this.upload_button = document.getElementById('upload')
+        this.upload_button.onchange = function() {
+            let image_name = this.files[0]['name']
+            let reader = new FileReader()
+            reader.readAsDataURL(this.files[0])
+            reader.onload = function(e) {
+                axios
+                    .post(
+                        backend_address + '/upload_image', {
+                            'collection_name': collection_name,
+                            'image': this.result, 'image_name': image_name,
+                        },
+                    )
+                    .then(response => {
+                    })
+                    .catch(error => {
+                        console.log(error)
+                    })
+                    .finally(() => {})
+            }
+        }
+        this.upload_json_button = document.getElementById('upload_json')
+        this.upload_json_button.onchange = function() {
+            let json_name = this.files[0]['name']
+            let reader = new FileReader()
+            reader.readAsText(this.files[0])
+            reader.onload = function(e) {
+                axios
+                    .post(backend_address + '/upload_json', {
+                        'collection_name': collection_name,
+                        'content': this.result, 'json_name': json_name,
+                    })
+                    .then(response => {
+                    })
+                    .catch(error => {
+                        console.log(error)
+                    })
+                    .finally(() => {})
+            }
+        }
+    }
+
+    reinitializeMaps() {
+        for (let i = 0; i < this.bg.height; i++) {
+            for (let j = 0; j < this.bg.width; j++) {
+                this.anno_idx_map[i][j] = -1
+                this.is_bbox_map[i][j] = 0
+                this.path_idx_map[i][j] = -1
+            }
+        }
+    }
+
+    fillMap(x: number, y: number, size: number, anno_idx: number, is_rect: boolean, path_idx: number) {
+        for (let i = parseInt((y - size / 2) + '', 10); i < parseInt((y + size / 2) + '', 10); i++) {
+            for (let j = parseInt((x - size / 2) + '', 10); j < parseInt((x + size / 2) + '', 10); j++) {
+                this.anno_idx_map[i][j] = anno_idx
+                this.is_bbox_map[i][j] = is_rect
+                this.path_idx_map[i][j] = path_idx
+                this.center_map[i][j] = [x, y]
+            }
+        }
+    }
+
+    renameImage() {
+        let new_name = prompt('Please enter a new name')
+        if (new_name == '') {
+            return
+        }
+        axios
+            .post(
+                backend_address + '/rename_image',
+                {
+                    'collection_name': collection_name,
+                    'origin_name': this.image_name,
+                    'new_name': new_name,
+                },
+            )
+            .then(response => {
+                console.log('new_name is', response.data)
+            })
+            .catch(error => {
+                console.log('rename image error')
+            })
+            .finally(() => {})
+        this.readCollectionList()
+    }
+
+    removeImage() {
+        let res = confirm("删除是不可恢复的，你确认要删除吗？")
+        if (!res) {
+            return
+        }
+        axios
+            .post(
+                backend_address + '/remove_image',
+                {
+                    'collection_name': collection_name,
+                    'image_name': this.image_name,
+                },
+            )
+            .then(response => {
+            })
+            .catch(error => {
+                console.log('remove image error')
+            })
+            .finally(() => {})
+        this.readCollectionList()
+    }
+
+
+    instruct() {
+        alert(
+            '添加标注：第一步，绘制矩形框；第二步，绘制多边形\n'
+            + '回退一步：在绘制多边形过程中，点击该按钮回退一步\n'
+            + '完成标注：在绘制多边形过程中，点击该按钮完成绘制\n'
+            + '退出标注：在添加标注任意一步中，点击该按钮退出标注进程\n'
+            + '删除标注：进入删除标注的状态，点击任意顶点删除对应标注\n'
+            + '增加顶点：进入增加顶点的状态，点击任意多边形顶点以增加顶点\n'
+            + '删除顶点：进入删除顶点的状态，点击任意多边形顶点以删除顶点\n'
+            + '保存标注：保存当前标注\n'
+            + '放大：放大局部区域，指定区域的方式是绘制一个矩形框\n'
+            + '重置：重置所有状态和放大模式\n'
+            + '上传图片：上传一张图片到当前目录下，格式为png、jpg、jpeg\n'
+            + '上传标注：上传一个标注文件，格式为json\n'
+            + '重命名：重命名当前图片\n'
+            + '删除图片：删除当前图片\n'
+            + '分辨率比例：修改图片的分辨率，有0.25 0.5 1.0 2.0 4.0五个选项\n'
+            + '选择图片：滑动滑块可以快速选择当前目录下的图片\n'
+            + '上一张图：跳转到上一张图\n'
+            + '下一张图：跳转到下一张图\n'
+            + '导入前一个标注：导入目录中之前最近的标注到当前图\n'
+            + '导入后一个标注：导入目录中之后最近的标注到当前图\n',
+        )
+    }
+
+
+    addListenerForButtons() {
+        (document.getElementById('add') as HTMLButtonElement).addEventListener('click', () => this.operate('a'));
+        (document.getElementById('bbox_pred') as HTMLButtonElement).addEventListener('click', () => this.operate('b'));
+        (document.getElementById('delete') as HTMLButtonElement).addEventListener('click', () => this.operate('d'));
+        (document.getElementById('insert') as HTMLButtonElement).addEventListener('click', () => this.operate('i'));
+        (document.getElementById('pop') as HTMLButtonElement).addEventListener('click', () => this.operate('p'));
+        (document.getElementById('quit') as HTMLButtonElement).addEventListener('click', () => this.operate('q'));
+        (document.getElementById('region') as HTMLButtonElement).addEventListener('click', () => this.operate('r'));
+        (document.getElementById('save') as HTMLButtonElement).addEventListener('click', () => this.operate('s'));
+        (document.getElementById('undo') as HTMLButtonElement).addEventListener('click', () => this.operate('u'));
+        (document.getElementById('close') as HTMLButtonElement).addEventListener('click', () => this.operate('c'));
+        (document.getElementById('reset') as HTMLButtonElement).addEventListener('click', () => {this.operate('q')});
+        (document.getElementById('rename') as HTMLButtonElement).addEventListener('click', () => {this.renameImage()});
+        (document.getElementById('remove') as HTMLButtonElement).addEventListener('click', () => {this.removeImage()});
+        (document.getElementById('next') as HTMLButtonElement).addEventListener('click', () => {this.nextImage()});
+        (document.getElementById('prev') as HTMLButtonElement).addEventListener('click', () => {this.prevImage()});
+        (document.getElementById('next_json') as HTMLButtonElement).addEventListener('click', () => {this.nextJson()});
+        (document.getElementById('prev_json') as HTMLButtonElement).addEventListener('click', () => {this.prevJson()});
+        (document.getElementById('instruct') as HTMLButtonElement).addEventListener('click', () => {this.instruct()})
+    }
+
+    mounted() {
+        // Initialize components
+        this.bg = document.getElementById('bg') as HTMLCanvasElement
+        this.context = this.bg.getContext('2d') as CanvasRenderingContext2D
+        this.bg.onmousemove = this.mouseMove
+        this.bg.onmousedown = this.mouseDown
+        this.bg.onmouseup = this.mouseUp
+        // collection selecter
+        this.collection_selecter = document.getElementById('collection_selecter') as HTMLSelectElement
+        this.collection_selecter.addEventListener('change', this.onCollectionChange)
+        // image selecter
+        this.image_selecter = document.getElementById('image_selecter') as HTMLSelectElement
+        this.image_selecter.addEventListener('change', this.onImageChange)
+        // ratio_selecter
+        this.ratio_selecter = document.getElementById('ratio_selecter') as HTMLSelectElement
+        this.ratio_selecter.addEventListener('change', this.onRatioChange)
+        this.ratio_selecter.selectedIndex = 2
+        // status div
+        this.status = document.getElementById('status') as HTMLDivElement
+        this.status.innerHTML = this.descriptions['drag_mode']
+        window.addEventListener('keydown', this.keyDown)
+        this.addListenerForButtons()
+        // scroll
+        window.addEventListener('mousewheel', this.scrollFunc, { passive: false })
+        // debug div
+        this.debugdiv = document.getElementById('debug_block') as HTMLDivElement
+        // range
+        this.comp_force_range = document.getElementById('comp_force')
+        this.adjust_force_range = document.getElementById('adjust_force')
+        this.select_image_range = document.getElementById('select_image')
+        this.select_image_range.addEventListener('change', this.onSelectImageChange)
+        this.select_image_range.addEventListener('mousemove', this.onSelectImageMove)
+        this.select_image_range.addEventListener('mouseout', this.onSelectImageOut)
+        // Detail Div
+        this.detaildiv = document.createElement('div')
+        this.detaildiv.align = 'center'
+        this.detaildiv.id = 'detail'
+        this.detaildiv.style.backgroundColor = '#ffffff'
+        this.detaildiv.style.height = '32px'
+        this.detaildiv.style.border = '1px solid #666666'
+        this.detaildiv.style.position = 'absolute'
+        document.body.appendChild(this.detaildiv)
+        // Initialize gloabl variables
+        this.annotation = {}
+        this.annotations = []
+        // Read image
+        // this.image_name = 'yousa.png'
+        // this.image_list = [{'image_name': 'yousa.png'}]
+        // this.readImage('yousa.png')
+        this.readCollectionList()
+        // window.setInterval(() => {
+        //     this.readImage('yousa.png')
+        // }, 3000);
+    }
+}
+</script>
+
+<!-- Add 'scoped' attribute to limit CSS to this component only -->
+<style scoped>
+.up_selecter {
+    width:256px;
+    height:32px;
+    margin:8px;
+    padding:0.2em;
+    border: 1px solid #94c1e7;
+    font-family: SimHei;
+    font-size: 16px;
+}
+#status {
+    margin:8px auto;
+    font-size:24px;
+    /* color:#ff9999; */
+    border-radius:16px;
+}
+
+.button {
+    width:90px;
+    height:36px;
+    text-align:center;
+    line-height:100%;
+    padding:0.3em;
+    font:16px Arial,sans-serif bold;
+    font-style:normal;
+    text-decoration:none;
+    margin:6px;
+    vertical-align:text-bottom;
+    zoom:1;
+    outline:none;
+    font-size-adjust:none;
+    font-stretch:normal;
+    border-radius:8px;
+    color:#000000;
+    background-repeat:repeat;
+    background-size:auto;
+    background-origin:padding-box;
+    background-clip:padding-box;
+    background-color:#ffffff;
+}
+ 
+.button:hover {
+    background: #ccccff;
+}
+
+.big_button {
+    width:150px;
+    height:36px;
+    text-align:center;
+    line-height:100%;
+    padding:0.3em;
+    font:16px Arial,sans-serif bold;
+    font-style:normal;
+    text-decoration:none;
+    margin:6px;
+    vertical-align:text-bottom;
+    zoom:1;
+    outline:none;
+    font-size-adjust:none;
+    font-stretch:normal;
+    border-radius:8px;
+    color:#000000;
+    background-repeat:repeat;
+    background-size:auto;
+    background-origin:padding-box;
+    background-clip:padding-box;
+    background-color:#ffffff;
+}
+
+.big_button:hover {
+    background: #ccccff;
+}
+
+.range {
+    width:132px;
+    height:24px;
+    margin:6px;
+    border-radius:16px;
+}
+
+.text {
+    font-size:20px;
+}
+
+</style>
