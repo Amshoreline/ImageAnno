@@ -1,7 +1,6 @@
 json*
-info/
-images/
+data/
 ckpts/
 *__pycache__*
 *.pyc
-soft_link_Qu.py
+

@@ -109,6 +109,7 @@ function max(a: number, b: number) {
 let backend_address: string = 'http://162.105.89.250:18002'
 
 let collection_name: string = ''   // collection name
+let token: string = ''  // token for authentification
 
 // Block right
 function blockright(oEvent: any) {
@@ -138,7 +139,6 @@ function hexToRGBA(hex: string, alpha: number): string | null {
 // The main class
 @Component
 export default class Test extends Vue {
-    single_use_flag: boolean = true
     collection_selecter: any    // collection_selecter component
     image_selecter: any     // image_selecter component
     sam_selecter: any       // sam_selecter component
@@ -221,6 +221,7 @@ export default class Test extends Vue {
             .post(
                 backend_address + '/get_sam_pred',
                 {
+                    'token': token,
                     'sam_type': this.sam_selecter.options[this.sam_selecter.selectedIndex].value,
                     'collection_name': collection_name,
                     'image_name': this.image_name,
@@ -237,41 +238,6 @@ export default class Test extends Vue {
             })
             .catch(error => {
                 this.status.innerHTML = this.descriptions['prompt_mode']
-                console.log(error)
-            })
-            .finally(() => {})
-    }
-
-
-    bboxPredict() {
-        console.log('Get bbox prediction')
-        this.status.innerHTML = '预测中，请稍后'
-        axios
-            .post(
-                backend_address + '/get_pred',
-                {
-                    'collection_name': collection_name,
-                    'image_name': this.image_name,
-                    // 'bbox': this.bbox,
-                    'compress_degree': parseInt(this.comp_force_range.value, 10),
-                },
-            )
-            .then(response => {
-                this.status.innerHTML = this.descriptions['drag_mode']
-                let new_annos = response.data
-                for (let label of new_annos) {
-                    // console.log(label)
-                    // console.log(new_annos[label])
-                    this.annotations.push(
-                        {
-                            // 'bbox': this.bbox,
-                            'path': new_annos[label],
-                            'label': label,
-                        },
-                    )
-                }
-            })
-            .catch(error => {
                 console.log(error)
             })
             .finally(() => {})
@@ -611,7 +577,14 @@ export default class Test extends Vue {
 
     readJson(image_name: string) {
         axios
-            .post(backend_address + '/get_anno', {'collection_name': collection_name, 'image_name': image_name})
+            .post(
+                backend_address + '/get_anno',
+                {
+                    'token': token,
+                    'collection_name': collection_name,
+                    'image_name': image_name,
+                },
+            )
             .then(response => {
                 console.log('readJson', image_name)
                 this.annotations = response.data
@@ -619,10 +592,6 @@ export default class Test extends Vue {
                 this.initialize()
                 this.resetRegion()
                 this.drawImageAnno()
-                // if (this.single_use_flag) {
-                //     this.resetRegion()
-                //     this.single_use_flag = false
-                // }
             })
             .catch(error => {
                 console.log(error)
@@ -637,7 +606,14 @@ export default class Test extends Vue {
     readImage() {
         console.log('readImage', this.image_name)
         axios
-            .post(backend_address + '/get_image', {'collection_name': collection_name, 'image_name': this.image_name})
+            .post(
+                backend_address + '/get_image',
+                {
+                    'token': token,
+                    'collection_name': collection_name,
+                    'image_name': this.image_name,
+                },
+            )
             .then(response => {
                 // let encryptedBytes = Buffer.from(response.data)
                 let encryptedBytes = response.data
@@ -695,32 +671,6 @@ export default class Test extends Vue {
         this.readImage()
     }
 
-    // nextJson() {
-    //     axios
-    //         .post(backend_address + '/next_json', {'collection_name': collection_name, 'image_name': this.image_name})
-    //         .then(response => {
-    //             this.readImage()
-    //         })
-    //         .catch(error => {
-    //             console.log(error)
-    //         })
-    //         .finally(() => {})
-    //     this.readImage()
-    // }
-
-    // prevJson() {
-    //     axios
-    //         .post(backend_address + '/prev_json', {'collection_name': collection_name, 'image_name': this.image_name})
-    //         .then(response => {
-    //             this.readImage()
-    //         })
-    //         .catch(error => {
-    //             console.log(error)
-    //         })
-    //         .finally(() => {})
-    //     this.readImage()
-    // }
-
     nextImage() {
         let cur_idx = parseInt(this.select_image_range.value, 10)
         if (cur_idx < this.select_image_range.max) {
@@ -745,7 +695,14 @@ export default class Test extends Vue {
 
     calcVolume() {
         axios
-            .post(backend_address + '/calc_volume', {'collection_name': collection_name, 'image_name': this.image_name})
+            .post(
+                backend_address + '/calc_volume',
+                {
+                    'token': token,
+                    'collection_name': collection_name,
+                    'image_name': this.image_name,
+                },
+            )
             .then(response => {
                 alert(response.data)
             })
@@ -786,26 +743,32 @@ export default class Test extends Vue {
         this.readImage()
     }
 
-    onSAMChange(e: any) {
-        axios
-            .post(backend_address + '/select_sam', {'collection_name': collection_name})
-            .then(response => {
-                this.image_list = response.data
-                this.select_image_range.value = 0
-                this.select_image_range.min = 0
-                this.select_image_range.max = this.image_list.length - 1
-                this.updateImageSelecter()
-            })
-            .catch(error => {
-                console.log(error)
-            })
-            .finally(() => {})
-    }
+    // onSAMChange(e: any) {
+    //     axios
+    //         .post(
+    //             backend_address + '/select_sam',
+    //             {
+    //                 'token': token,
+    //                 'collection_name': collection_name
+    //             }
+    //         )
+    //         .then(response => {
+    //             this.image_list = response.data
+    //             this.select_image_range.value = 0
+    //             this.select_image_range.min = 0
+    //             this.select_image_range.max = this.image_list.length - 1
+    //             this.updateImageSelecter()
+    //         })
+    //         .catch(error => {
+    //             console.log(error)
+    //         })
+    //         .finally(() => {})
+    // }
 
     readCollectionList() {
         console.log('Get collection list')
         axios
-            .post(backend_address + '/get_collection_list', {})
+            .post(backend_address + '/get_collection_list', {'token': token})
             .then(response => {
                 this.collection_list = response.data
                 this.updateCollectionSelecter()
@@ -820,7 +783,7 @@ export default class Test extends Vue {
     readImageList() {
         console.log('Get image list in collection:', collection_name)
         axios
-            .post(backend_address + '/get_image_list', {'collection_name': collection_name})
+            .post(backend_address + '/get_image_list', {'token': token, 'collection_name': collection_name})
             .then(response => {
                 this.image_list = response.data
                 this.select_image_range.value = 0
@@ -1207,6 +1170,7 @@ export default class Test extends Vue {
                     .post(
                         backend_address + '/save_anno',
                         {
+                            'token': token,
                             'collection_name': collection_name,
                             'image_name': this.image_name,
                             'anno': this.annotations,
@@ -1261,31 +1225,12 @@ export default class Test extends Vue {
                 // 说明书
                 this.instruct()
                 break
-            // case 't':
-            //     console.log('update_pred')
-            //     axios
-            //         .post(
-            //             backend_address + '/update_pred',
-            //             {
-            //                 'collection_name': collection_name,
-            //                 'image_name': this.image_name, 'anno': this.annotation,
-            //                 // 'alpha': parseInt(this.adjust_force_range.value, 10),
-            //                 'compress_degree': parseInt(this.comp_force_range.value, 10)},
-            //         )
-            //         .then(response => {
-            //             this.annotations[this.drag_index]['path'] = response.data
-            //         })
-            //         .catch(error => {
-            //             console.log('update_anno error')
-            //         })
-            //         .finally(() => {})
-            //     break
             case 'z':
                 // debug用
                 console.log('Test key "z"')
                 axios
                     .post(
-                        backend_address + '/test', {'message': 'hello'},
+                        backend_address + '/test', {'token': token, 'message': 'hello'},
                     )
                     .then(response => {
                         console.log(response)
@@ -1361,8 +1306,10 @@ export default class Test extends Vue {
                 axios
                     .post(
                         backend_address + '/upload_image', {
+                            'token': token,
                             'collection_name': collection_name,
-                            'image': this.result, 'image_name': image_name,
+                            'image': this.result,
+                            'image_name': image_name,
                         },
                     )
                     .then(response => {
@@ -1382,8 +1329,10 @@ export default class Test extends Vue {
             reader.onload = function(e) {
                 axios
                     .post(backend_address + '/upload_json', {
+                        'token': token,
                         'collection_name': collection_name,
-                        'content': this.result, 'json_name': json_name,
+                        'content': this.result,
+                        'json_name': json_name,
                     })
                     .then(response => {
                         alert('上传成功')
@@ -1426,6 +1375,7 @@ export default class Test extends Vue {
             .post(
                 backend_address + '/rename_image',
                 {
+                    'token': token,
                     'collection_name': collection_name,
                     'origin_name': this.image_name,
                     'new_name': new_name,
@@ -1450,6 +1400,7 @@ export default class Test extends Vue {
             .post(
                 backend_address + '/remove_image',
                 {
+                    'token': token,
                     'collection_name': collection_name,
                     'image_name': this.image_name,
                 },
@@ -1465,7 +1416,14 @@ export default class Test extends Vue {
 
     downloadAnno() {
         axios
-            .post(backend_address + '/get_anno_png', {'collection_name': collection_name, 'image_name': this.image_name})
+            .post(
+                backend_address + '/get_anno_png',
+                {
+                    'token': token,
+                    'collection_name': collection_name,
+                    'image_name': this.image_name,
+                },
+            )
             .then(response => {
                 let encryptedBytes = response.data
                 console.log(encryptedBytes)
@@ -1538,6 +1496,7 @@ export default class Test extends Vue {
     }
 
     mounted() {
+        token = window.location.search.substring(1)
         // Initialize components
         this.bg = document.getElementById('bg') as HTMLCanvasElement
         this.context = this.bg.getContext('2d') as CanvasRenderingContext2D
@@ -1552,7 +1511,7 @@ export default class Test extends Vue {
         this.image_selecter.addEventListener('change', this.onImageChange)
         // sam_selecter
         this.sam_selecter = document.getElementById('sam_selecter') as HTMLSelectElement
-        this.sam_selecter.addEventListener('change', this.onSAMChange)
+        // this.sam_selecter.addEventListener('change', this.onSAMChange)
         this.sam_selecter.selectedIndex = 1
         // status div
         this.status = document.getElementById('status') as HTMLDivElement
