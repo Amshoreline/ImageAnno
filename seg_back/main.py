@@ -11,10 +11,12 @@ import PIL.Image as Image
 from io import BytesIO
 import base64
 #
-from flask import Flask, request, send_file
+from flask import Flask, request, send_from_directory
 from flask_cors import CORS
-app = Flask(__name__)
+app = Flask(__name__, static_folder='/root/ImageAnno/anno_front/dist', static_url_path='')
 CORS(app)
+#
+from gevent import pywsgi
 #
 from sam_predictor import get_predictor, get_contour
 
@@ -29,7 +31,7 @@ token2user = {
 
 @app.route('/')
 def hello_world():
-    return 'Hello World from root!'
+    return send_from_directory('dist', 'index.html')
 
 
 @app.route('/test', methods = ['POST'])
@@ -365,4 +367,6 @@ def calc_volume():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port='8002', threaded=False)
+    # app.run(host='0.0.0.0', port='8002', threaded=False)
+    server = pywsgi.WSGIServer(('0.0.0.0', 8002), app)
+    server.serve_forever()
