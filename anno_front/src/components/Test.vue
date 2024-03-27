@@ -19,7 +19,6 @@
                 <button class='button' id='insert'>增加顶点(i)</button>
                 <button class='button' id='pop'>删除顶点(p)</button>
                 <button class='button' id='delete'>删除标注(d)</button>
-                <button class='button' id='clear_anno'>清空标注</button>
                 <label class='small_text'>显示标注</label>
                 <input class='mui-switch' type='checkbox' id='show_anno' checked>
             </div>
@@ -62,7 +61,12 @@
                 <button class='small_button' id='next'>下一张图像</button>
             </div>
         </div>
-        <div class='button_box' style='width:320px;position:absolute;top:400px;left:932px;' align='center'>
+        <div class='button_box' style='width:320px;position:absolute;top:360px;left:932px;' align='center'>
+            <button class='small_button' id='dilate_anno'>扩充标注</button>
+            <button class='small_button' id='erode_anno'>删除假阳</button>
+            <button class='button' id='clear_anno'>清空标注</button>
+        </div>
+        <div class='button_box' style='width:320px;position:absolute;top:440px;left:932px;' align='center'>
             <input class='small_button' type='button' value='上传图片' onclick="document.getElementById('upload').click()">
             <input type="file" id="upload" accept="image/png, image/jpeg" name="upload" style="display:none" readonly/>
             <input class='small_button' type='button' value='上传标注' onclick="document.getElementById('upload_json').click()">
@@ -238,6 +242,29 @@ export default class Test extends Vue {
             })
             .catch(error => {
                 this.status.innerHTML = this.descriptions['prompt_mode']
+                console.log(error)
+            })
+            .finally(() => {})
+    }
+
+    dilateAnno() {
+        axios
+            .post(
+                backend_address + '/get_more_sam_pred',
+                {
+                    'token': token,
+                    'sam_type': this.sam_selecter.options[this.sam_selecter.selectedIndex].value,
+                    'collection_name': collection_name,
+                    'image_name': this.image_name,
+                    'compress_degree': parseInt(this.comp_force_range.value, 10),
+                },
+            )
+            .then(response => {
+                this.annotation = {}
+                this.annotations = response.data
+                this.drawImageAnno()
+            })
+            .catch(error => {
                 console.log(error)
             })
             .finally(() => {})
@@ -621,8 +648,8 @@ export default class Test extends Vue {
                 this.image.src = this.image_url
                 this.readJson(this.image_name)
                 this.status.innerHTML = this.descriptions['drag_mode']
-                //
-                this.samSetImage()
+                // 这个操作会降低切换图片的速度
+                // this.samSetImage()
             })
             .catch(error => {
                 console.log(error)
@@ -1214,6 +1241,9 @@ export default class Test extends Vue {
                 this.annotations = []
                 this.drawImageAnno()
                 break
+            case 'dilate_anno':
+                this.dilateAnno()
+                break
             case 'rename':
                 // 重命名
                 this.renameImage()
@@ -1504,12 +1534,11 @@ export default class Test extends Vue {
         //
         (document.getElementById('next') as HTMLButtonElement).addEventListener('click', () => {this.operate('next')});
         (document.getElementById('prev') as HTMLButtonElement).addEventListener('click', () => {this.operate('prev')});
-        // (document.getElementById('next_json') as HTMLButtonElement).addEventListener('click', () => {this.nextJson()});
-        // (document.getElementById('prev_json') as HTMLButtonElement).addEventListener('click', () => {this.prevJson()});
         (document.getElementById('calc_volume') as HTMLButtonElement).addEventListener('click', () => {this.operate('calc_volume')});
         (document.getElementById('instruct') as HTMLButtonElement).addEventListener('click', () => {this.operate('instruct')});
+        (document.getElementById('sam_pred') as HTMLButtonElement).addEventListener('click', () => {this.operate('m')});
         (document.getElementById('clear_anno') as HTMLButtonElement).addEventListener('click', () => {this.operate('clear_anno')});
-        (document.getElementById('sam_pred') as HTMLButtonElement).addEventListener('click', () => {this.operate('m')})
+        (document.getElementById('dilate_anno') as HTMLButtonElement).addEventListener('click', () => {this.operate('dilate_anno')})
     }
 
     mounted() {

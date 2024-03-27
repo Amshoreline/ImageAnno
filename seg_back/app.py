@@ -15,10 +15,11 @@ from flask import Flask, request, send_from_directory
 from flask_cors import CORS
 app = Flask(__name__, static_folder='/root/ImageAnno/seg_back/dist', static_url_path='')
 CORS(app)
-#
 from gevent import pywsgi
 #
 from sam_predictor import get_predictor, get_contour
+from fewshot_sam_predictor import find_remaining_cells
+
 
 # Global variables
 sam_model_dict = {}
@@ -233,8 +234,60 @@ def get_sam_pred():
         mask_input=mask_input,
     )
     sam_model.low_res_mask = low_res_masks[0][None]
-    sam_pred = get_contour(masks[0], compress_degree, image.shape)
-    return json.dumps(sam_pred).encode()
+    sam_pred = get_contour(masks[0], compress_degree)
+    return json.dumps([sam_pred]).encode()
+
+
+@app.route('/get_more_sam_pred', methods=['POST'])
+def get_more_sam_pred():
+    global sam_model_dict
+    #
+    params = request.get_json(silent=True)
+    user = token2user[params['token']]
+    # parse parameters
+    sam_type = params['sam_type']
+    collection_name = params['collection_name']
+    image_name = params['image_name']
+    compress_degree = params['compress_degree']
+    # get height and width
+    with open(f'data/{user}/{collection_name}/info.json', 'r') as reader:
+        image_list = eval(reader.read())
+    for item in image_list:
+        if item['image_name'] == image_name:
+            height, width = item['height'], item['width']
+    # prepare ori_masks
+    json_name = image_name.replace('.jpg', '.json')
+    json_path = f'data/{user}/{collection_name}/jsons/{json_name}'
+    with open(json_path, 'r') as reader:
+        contours = eval(reader.read())
+    ori_masks = []
+    ori_cls_list = []
+    for contour in contours:
+        mask = np.zeros((height, width), dtype=np.uint8)
+        contour_arr = np.round([[item['x'], item['y']] for item in contour['path']]).astype(np.int32)
+        cv2.fillPoly(mask, [contour_arr], 1)
+        ori_masks.append(mask)
+        ori_cls_list.append(int(contour['label']))
+    # set model and image
+    if not sam_type in sam_model_dict:
+        sam_model_dict[sam_type] = get_predictor(sam_type)
+    sam_model = sam_model_dict[sam_type]
+    image_path = f'data/{user}/{collection_name}/images/{image_name}'
+    image = np.array(Image.open(image_path))
+    if len(image.shape) == 2:
+        image = np.concatenate([image[..., None], ] * 3, axis=-1)
+    if sam_model.image_path != image_path:
+        sam_model.image_path = image_path
+        sam_model.set_image(image)
+    # genereate masks
+    masks, cls_list = find_remaining_cells(sam_model, ori_masks, ori_cls_list)
+    # convert masks to json
+    contours = []
+    for mask, cls_id in zip(masks, cls_list):
+        contour = get_contour(mask, compress_degree)
+        contour['label'] = str(cls_id)
+        contours.append(contour)
+    return json.dumps(contours).encode()
 
 
 @app.route('/upload_image', methods=['POST'])

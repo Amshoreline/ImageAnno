@@ -37,8 +37,8 @@ def compress(p_list, compress_degree=20):
     return ret
 
 
-def get_contour(mask, compress_degree, image_shape):
-    H, W, *_ = image_shape
+def get_contour(mask, compress_degree):
+    H, W = mask.shape
     # Get contour
     h = cv2.findContours(
         (mask > 0).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
@@ -46,7 +46,18 @@ def get_contour(mask, compress_degree, image_shape):
     contours = list(h[0])
     contours = [compress(contour.astype(np.float32), compress_degree) for contour in contours]
     contours.sort(key=lambda x : cv2.contourArea(x), reverse=True)
-    contours = contours[: 1]
+    contour = contours[0]
+    contour = {
+        'path': [
+            {
+                'x': min(W - 1, max(1, int(point[0, 0]))),
+                'y': min(H - 1, max(1, int(point[0, 1]))),
+            }
+            for point in contour
+        ]
+    }
+    return contour
+    # contours = contours[: 1]
     # contours = [cv2.convexHull(contour) for contour in contours]
     # contour = cv2.convexHull(contours[0]).astype(np.float32)
     # contour = contours[0].astype(np.float32)
@@ -56,19 +67,7 @@ def get_contour(mask, compress_degree, image_shape):
     #     {'x': int(point[0, 0]), 'y': int(point[0, 1])}
     #     for point in contour
     # ]
-    contours = [
-        {
-            'path': [
-                {
-                    'x': min(W - 1, max(1, int(point[0, 0]))),
-                    'y': min(H - 1, max(1, int(point[0, 1]))),
-                }
-                for point in contour
-            ]
-        }
-        for contour in contours
-    ]
-    return contours
+    # return contours
 
 
 def get_predictor(model_type='vit_b'):
@@ -83,6 +82,7 @@ def get_predictor(model_type='vit_b'):
     device = 'cuda'
     sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
     sam.to(device=device)
+    sam.eval()
     predictor = SamPredictor(sam)
     predictor.image_path = ''
     predictor.low_res_mask = None

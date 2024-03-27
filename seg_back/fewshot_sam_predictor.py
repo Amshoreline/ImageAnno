@@ -3,10 +3,8 @@ import random
 from glob import glob
 from PIL import Image
 import cv2
-from tqdm import tqdm
+from tqdm import tqdm, trange
 import argparse
-import matplotlib.pyplot as plt
-from tqdm import trange
 import warnings
 warnings.filterwarnings('ignore')
 #
@@ -14,8 +12,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-
-from segment_anything import sam_model_registry, SamPredictor
 
 
 class Mask_Weights(nn.Module):
@@ -269,7 +265,7 @@ def get_mask(predictor, topk_xy, topk_label, weights_np, cell_radius):
     return masks[best_idx]  # (ori_h, ori_w)
 
 
-def find_cells(predictor, weights_list, cell_feat_matrix, cell_radius_list, test_image, max_objs):
+def find_cells(predictor, weights_list, cell_feat_matrix, cell_radius_list, max_objs):
     '''
     Params:
         predictor: SAMPredictor
@@ -278,25 +274,21 @@ def find_cells(predictor, weights_list, cell_feat_matrix, cell_radius_list, test
             M: number of cell classes
             N: number of shots
         cell_radius_list: np.ndarray(M, )    dtype=np.float32
-        test_image: np.ndarray(H, W, 3)     dtype=np.uint8
         max_objs: int   maximal number of objects
     Return:
-        res_mask_list: np.ndarray(M, H, W)  dtype=np.int32  instance mask
-        fg_mask_list: np.ndarray(M, H, W)   dtype=np.uint8  foreground mask 
-        coefs_list: [coefs_0, ...]
-            coefs: [(inst_ind_0, coef_score_0), ...]    dtype=float32  coefficients of every objects
-        prompts_list: [prompsts_0, ...]
-            prompts_*: ([points_0, ...], [labels_0, ...]) prompts of every objects
+        masks: np.ndarray(#instances, H, W)  dtype=np.int32  instance mask
+        cls_list: np.ndarray(#instances, )
+        coefs: np.ndarray(#instances, )
+        prompts: (points, labels)
     '''
     #
     M, N, C = cell_feat_matrix.shape
     # Prepare intermediate variables
-    res_mask_list = np.zeros([M, *test_image.shape[: 2]], dtype=np.int32)
-    fg_mask_list = np.zeros_like(res_mask_list, dtype=np.uint8)
-    coefs_list = [[] for _ in range(M)]
-    prompts_list = [([], []) for _ in range(M)]
+    masks = []
+    cls_list = []
+    coefs = []
+    prompts = ([], [])
     # Image feature encoding
-    predictor.set_image(test_image)
     test_feat = predictor.features.squeeze()  # (C, 64, 64)
     # Cosine similarity
     _, feat_h, feat_w = test_feat.shape
@@ -320,11 +312,11 @@ def find_cells(predictor, weights_list, cell_feat_matrix, cell_radius_list, test
         # if (np.sum(new_mask & fg_mask_list[class_ind]) / np.sum(new_mask)) > 0.8:
         #     break
         # Store the intermediate results
-        res_mask_list[class_ind, new_mask] = inst_ind
-        fg_mask_list[class_ind] = fg_mask_list[class_ind] | new_mask
-        coefs_list[class_ind].append((inst_ind, sim.max()))
-        prompts_list[class_ind][0].append(topk_xy)
-        prompts_list[class_ind][1].append(topk_label)
+        masks.append(new_mask)
+        cls_list.append(class_ind + 1)
+        coefs.append(sim.max().item())
+        prompts[0].append(topk_xy)
+        prompts[1].append(topk_label)
         # Post process the similarity mask
         remove_mask = F.max_pool2d(
             torch.as_tensor(new_mask).float().to(sim.device)[None, None],
@@ -333,100 +325,59 @@ def find_cells(predictor, weights_list, cell_feat_matrix, cell_radius_list, test
         sim[class_ind, remove_mask > 0] = torch.min(sim)
         if sim.max() < 0.5:
             break
-    for class_ind in range(len(prompts_list)):
-        prompts = prompts_list[class_ind]
-        if len(prompts[0]) > 0:
-            prompts_list[class_ind] = (
-                np.concatenate(prompts[0], axis=0), np.concatenate(prompts[1])
-            )
-    return res_mask_list, fg_mask_list, coefs_list, prompts_list
-
-
-def get_arguments():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--data_type', type=str, default='MoNuSAC')
-    parser.add_argument('--outdir', type=str, default='fewshot_sam_f')
-    parser.add_argument('--sam_type', type=str, default='vit_b')
-    parser.add_argument('--nshots', type=int, default=1)
-    parser.add_argument('--max_objs', type=int, default=600)
-    parser.add_argument('--lr', type=float, default=1e-1) 
-    parser.add_argument('--num_epochs', type=int, default=1000)
-    parser.add_argument('--log_freq', type=int, default=200)
-    args = parser.parse_args()
-    return args
-
-
-def main():
-    args = get_arguments()
-    print('Args:', args)
-    # Load SAM
-    print('======> Load SAM')
-    if args.sam_type == 'vit_h':
-        sam_type, sam_ckpt = 'vit_h', 'ckpts/sam_vit_h_4b8939.pth'
-    elif args.sam_type == 'vit_l':
-        sam_type, sam_ckpt = 'vit_l', 'ckpts/sam_vit_l_0b3195.pth'
-    elif args.sam_type == 'vit_b':
-        sam_type, sam_ckpt = 'vit_b', 'ckpts/sam_vit_b_01ec64.pth'
-    sam = sam_model_registry[sam_type](checkpoint=sam_ckpt).cuda()
-    sam.eval()
-    print('From', sam_ckpt)
-    predictor = SamPredictor(sam)
     #
+    masks = np.array(masks)
+    cls_list = np.array(cls_list)
+    coefs = np.array(coefs)
+    prompts = [np.array(prompts[0]), np.array(prompts[1])]
+    return masks, cls_list, coefs, prompts
 
+
+def find_remaining_cells(predictor, ori_masks, ori_cls_list):
+    '''
+    Params:
+        predictor: SamPredictor, we assume that predictor.is_image_set == True
+        ori_masks: (#ori_instances, H, W)
+        ori_cls_list: (#ori_instances, )
+    Return:
+        masks: (#instances, H, W)
+        cls_list: (#instances, )
+    '''
+    lr = 1e-1
+    num_epochs = 200
+    log_freq = 100
+    max_objs = 20
+    assert predictor.is_image_set
     # Collect support set
     print('======> Collect support set')
+    num_fg_classes = np.max(ori_cls_list)
     gt_mask_matrix = [[] for _ in range(num_fg_classes)]
     cell_feat_matrix = [[] for _ in range(num_fg_classes)]
     logits_matrix = [[] for _ in range(num_fg_classes)]
-    cell_radius_list = np.zeros(num_fg_classes)
-    for image_path in image_path_dict['train']:
-        image = np.array(Image.open(image_path))
-        label = np.load(image_path.replace('images', 'masks').replace('.png', '.npy'))
-        inst_label = label[..., 0]
-        class_label = label[..., 1]
-        # Prepare ref_masks and class_inds
-        ref_masks = []
-        class_inds = []
-        fg_class_counts = np.zeros(num_fg_classes, dtype=np.int32)
-        for inst_ind in np.unique(inst_label)[1 :]:
-            ref_mask = (inst_label == inst_ind)
-            class_ind = round(np.median(class_label[ref_mask])) - 1
-            if fg_class_counts[class_ind] >= args.nshots:
-                continue
-            ref_masks.append(ref_mask.astype(np.uint8))
-            class_inds.append(class_ind)
-            fg_class_counts[class_ind] += 1
-        # Get cell_feats
-        predictor.set_image(image)
-        prompts_list, gt_masks, cell_feats = get_cell_feats(predictor, ref_masks)
-        for cell_ind in range(len(ref_masks)):
-            class_ind = class_inds[cell_ind]
-            cur_support_size = len(cell_feat_matrix[class_ind])
-            if cell_feats[cell_ind] is None or (cur_support_size >= args.nshots):
-                continue
-            gt_mask_matrix[class_ind].append(gt_masks[cell_ind][0])
-            cell_feat_matrix[class_ind].append(cell_feats[cell_ind])
-            _, _, low_res_masks = predictor.predict(
-                point_coords=prompts_list[cell_ind][0],
-                point_labels=prompts_list[cell_ind][1],
-                multimask_output=True
-            )
-            logits = torch.as_tensor(low_res_masks).cuda()
-            logits_matrix[class_ind].append(logits)
-            cell_radius_list[class_ind] += np.sqrt(np.sum(ref_masks[cell_ind]) / np.pi)
-        if min(
-            [
-                len(cell_feat_matrix[class_ind - 1])
-                for class_ind in range(num_fg_classes)
-            ]
-        ) >= args.nshots:
-            break
+    cell_radius_list = [[] for _ in range(num_fg_classes)]
+    # Get cell_feats
+    prompts_list, gt_masks, cell_feats = get_cell_feats(predictor, ori_masks)
+    for cell_ind in range(len(ori_masks)):
+        class_ind = ori_cls_list[cell_ind] - 1
+        if cell_feats[cell_ind] is None:  # when the foreground area in ref_mask is too small
+            continue
+        gt_mask_matrix[class_ind].append(gt_masks[cell_ind][0])
+        cell_feat_matrix[class_ind].append(cell_feats[cell_ind])
+        _, _, low_res_masks = predictor.predict(
+            point_coords=prompts_list[cell_ind][0],
+            point_labels=prompts_list[cell_ind][1],
+            multimask_output=True
+        )
+        logits = torch.as_tensor(low_res_masks).cuda()
+        logits_matrix[class_ind].append(logits)
+        cell_radius_list[class_ind].append(np.sqrt(np.sum(ori_masks[cell_ind]) / np.pi))
     for class_ind in range(num_fg_classes):
         # shape = (nshots, C)
         cell_feat_matrix[class_ind] = torch.cat(cell_feat_matrix[class_ind], dim=0)[None]
+        print('Cell class', class_ind + 1, 'Cell feats', cell_feat_matrix.shape)
+    # TODO: 修改cell_feat_matrix
     cell_feat_matrix = torch.cat(cell_feat_matrix, dim=0)
-    print('Cell feats', cell_feat_matrix.shape)
-    cell_radius_list = cell_radius_list / args.nshots
+    cell_radius_list = np.array([np.mean(cell_radius) for cell_radius in cell_radius_list])
     print('Cell radius', cell_radius_list)
     # Train weights
     weights_list = []
@@ -434,7 +385,7 @@ def main():
         weights = get_weights(
             logits_matrix[class_ind],
             gt_mask_matrix[class_ind],
-            args.lr, args.num_epochs, args.log_freq
+            lr, num_epochs, log_freq
         )
         weights_list.append(weights)
     weights_list = np.array(weights_list)
@@ -443,17 +394,8 @@ def main():
         print('\t', np.round(weights.reshape(-1), 2))
     # Inference
     print('======> Inference')
-    for image_ind in trange(0, min(len(image_path_dict['test']), 100)):
-        image_path = image_path_dict['test'][image_ind]
-        image = np.array(Image.open(image_path))
-        label = np.load(image_path.replace('images', 'masks').replace('.png', '.npy'))
-        #
-        inst_label = label[..., 0]
-        class_label = label[..., 1]
-        inst_pred_list, fg_pred_list, coefs_list, prompts_list = find_cells(
-            predictor, weights_list, cell_feat_matrix, cell_radius_list, image, args.max_objs
-        )
-
-
-if __name__ == '__main__':
-    main()
+    masks, cls_list, coefs, prompts = find_cells(
+        predictor, weights_list, cell_feat_matrix, cell_radius_list, max_objs
+    )
+    # TODO: filter out the ori_masks from masks
+    return masks, cls_list
