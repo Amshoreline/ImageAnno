@@ -621,11 +621,28 @@ export default class Test extends Vue {
                 this.image.src = this.image_url
                 this.readJson(this.image_name)
                 this.status.innerHTML = this.descriptions['drag_mode']
+                //
+                this.samSetImage()
             })
             .catch(error => {
                 console.log(error)
             })
             .finally(() => {})
+    }
+
+    samSetImage() {
+        axios.post(
+            backend_address + '/sam_set_image',
+            {
+                'token': token,
+                'sam_type': this.sam_selecter.options[this.sam_selecter.selectedIndex].value,
+                'collection_name': collection_name,
+                'image_name': this.image_name,
+            },
+        )
+        .then(response => {})
+        .catch(error => {})
+        .finally(() => {})
     }
 
     // update '<select>'

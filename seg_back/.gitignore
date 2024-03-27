@@ -1,4 +1,5 @@
 json*
+dist/
 data/
 ckpts/
 *__pycache__*

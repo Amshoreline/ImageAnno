@@ -13,7 +13,7 @@ import base64
 #
 from flask import Flask, request, send_from_directory
 from flask_cors import CORS
-app = Flask(__name__, static_folder='/root/ImageAnno/anno_front/dist', static_url_path='')
+app = Flask(__name__, static_folder='/root/ImageAnno/seg_back/dist', static_url_path='')
 CORS(app)
 #
 from gevent import pywsgi
@@ -139,6 +139,31 @@ def save_anno():
     anno = params['anno']
     with open(json_path, 'w') as writer:
         writer.write(json.dumps(anno, indent=4))
+    return 'Done'.encode()
+
+
+@app.route('/sam_set_image', methods=['POST'])
+def sam_set_image():
+    global sam_model_dict
+    #
+    params = request.get_json(silent=True)
+    user = token2user[params['token']]
+    #
+    sam_type = params['sam_type']
+    collection_name = params['collection_name']
+    image_name = params['image_name']
+    #
+    if not sam_type in sam_model_dict:
+        sam_model_dict[sam_type] = get_predictor(sam_type)
+    sam_model = sam_model_dict[sam_type]
+    # set image
+    image_path = f'data/{user}/{collection_name}/images/{image_name}'
+    image = np.array(Image.open(image_path))
+    if len(image.shape) == 2:
+        image = np.concatenate([image[..., None], ] * 3, axis=-1)
+    if sam_model.image_path != image_path:
+        sam_model.image_path = image_path
+        sam_model.set_image(image)
     return 'Done'.encode()
 
 
@@ -367,6 +392,5 @@ def calc_volume():
 
 
 if __name__ == '__main__':
-    # app.run(host='0.0.0.0', port='8002', threaded=False)
-    server = pywsgi.WSGIServer(('0.0.0.0', 8002), app)
-    server.serve_forever()
+    app.run(host='0.0.0.0', port='8002', threaded=False)
+    # pywsgi.WSGIServer(('0.0.0.0', 8002), app).serve_forever()
