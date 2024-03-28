@@ -158,6 +158,7 @@ export default class Test extends Vue {
     //
     prompt: any = {'points': [], 'labels': [], 'bbox': {}}
     sam_annotations: any = [] // SAM的预测结果
+    sam_set_image_timer: any  // SAM提前加载图片的倒计时
     //
     drag_index: number = -1 // index of the selected annotation
     point_idx: number = 0   // index of the selected point
@@ -649,6 +650,10 @@ export default class Test extends Vue {
                 this.readJson(this.image_name)
                 this.status.innerHTML = this.descriptions['drag_mode']
                 // 这个操作会降低切换图片的速度
+                if (this.image_name.length > 1) {
+                    clearTimeout(this.sam_set_image_timer)
+                    this.sam_set_image_timer = setTimeout(this.samSetImage, 1500)
+                }
                 // this.samSetImage()
             })
             .catch(error => {
@@ -1398,13 +1403,18 @@ export default class Test extends Vue {
                 this.anno_idx_map[i][j] = -1
                 this.is_bbox_map[i][j] = 0
                 this.path_idx_map[i][j] = -1
+                this.center_map[i][j] = [0, 0]
             }
         }
     }
 
     fillMap(x: number, y: number, size: number, anno_idx: number, is_rect: boolean, path_idx: number) {
-        for (let i = parseInt((y - size / 2) + '', 10); i < parseInt((y + size / 2) + '', 10); i++) {
-            for (let j = parseInt((x - size / 2) + '', 10); j < parseInt((x + size / 2) + '', 10); j++) {
+        let min_i = Math.max(parseInt((y - size / 2) + '', 10), 0)
+        let max_i = Math.min(parseInt((y + size / 2) + '', 10), this.bg.height)
+        let min_j = Math.max(parseInt((x - size / 2) + '', 10), 0)
+        let max_j = Math.min(parseInt((x + size / 2) + '', 10), this.bg.width)
+        for (let i = min_i; i < max_i; i++) {
+            for (let j = min_j; j < max_j; j++) {
                 this.anno_idx_map[i][j] = anno_idx
                 this.is_bbox_map[i][j] = is_rect
                 this.path_idx_map[i][j] = path_idx

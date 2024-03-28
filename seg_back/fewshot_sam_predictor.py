@@ -374,7 +374,7 @@ def find_remaining_cells(predictor, ori_masks, ori_cls_list):
     for class_ind in range(num_fg_classes):
         # shape = (nshots, C)
         cell_feat_matrix[class_ind] = torch.cat(cell_feat_matrix[class_ind], dim=0)[None]
-        print('Cell class', class_ind + 1, 'Cell feats', cell_feat_matrix.shape)
+        print('Cell class', class_ind + 1, 'Cell feats', cell_feat_matrix[class_ind].shape)
     # TODO: 修改cell_feat_matrix
     cell_feat_matrix = torch.cat(cell_feat_matrix, dim=0)
     cell_radius_list = np.array([np.mean(cell_radius) for cell_radius in cell_radius_list])

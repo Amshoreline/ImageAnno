@@ -292,7 +292,7 @@ def get_more_sam_pred():
 
 @app.route('/upload_image', methods=['POST'])
 def upload_image():
-    max_len = 800
+    max_len = 1000
     params = request.get_json(silent=True)
     user = token2user[params['token']]
     #
