@@ -32,7 +32,7 @@
             <canvas id='bg' width=768 height=768></canvas>
         </div>
         <!-- <div class='button_box' style='width:320px;position:absolute;top:64px;left:932px;' align='center'></div> -->
-        <div class='button_box' style='width:320px;position:absolute;top:100px;left:932px;' align='center'>
+        <div class='button_box' style='width:320px;position:absolute;top:64px;left:932px;' align='center'>
             <label class='text'>选择模型</label>
             <select id='sam_selecter' class='up_selecter'>
                 <option value='vit_h'>SAM-H</option>
@@ -61,12 +61,17 @@
                 <button class='small_button' id='next'>下一张图像</button>
             </div>
         </div>
-        <div class='button_box' style='width:320px;position:absolute;top:360px;left:932px;' align='center'>
-            <button class='small_button' id='dilate_anno'>扩充标注</button>
+        <div class='button_box' style='width:320px;position:absolute;top:320px;left:932px;' align='center'>
+            <button class='small_button' id='dilate_anno'>扩充实例</button>
             <button class='small_button' id='erode_anno'>删除假阳</button>
             <button class='button' id='clear_anno'>清空标注</button>
+            <label class='small_text'>扩充数量</label>
+            <input class='small_text' type='text' id='dilate_max_objs' value="100" />
+            &nbsp;
+            <label class='small_text'>扩充阈值</label>
+            <input class='select_range' type='range' id='dilate_thres' min='0' max='10' default='5' />
         </div>
-        <div class='button_box' style='width:320px;position:absolute;top:440px;left:932px;' align='center'>
+        <div class='button_box' style='width:320px;position:absolute;top:420px;left:932px;' align='center'>
             <input class='small_button' type='button' value='上传图片' onclick="document.getElementById('upload').click()">
             <input type="file" id="upload" accept="image/png, image/jpeg" name="upload" style="display:none" readonly/>
             <input class='small_button' type='button' value='上传标注' onclick="document.getElementById('upload_json').click()">
@@ -78,15 +83,15 @@
             <label class='text'>SAM预测结果平滑程度</label>
             <input class='select_range' type='range' id='comp_force' min='0' max='5' default='2' />
         </div>
-        <div class="button_box" style='width:320px;position:absolute;top:600px;left:932px;' align='center'>
+        <div class="button_box" style='width:320px;position:absolute;top:580px;left:932px;' align='center'>
             <label class='text'>标签颜色表</label>
             <div class='color-table'>
-                <div class="color" style="background-color: #D79B00;">1</div>
-                <div class="color" style="background-color: #6C8EBF;">2</div>
-                <div class="color" style="background-color: #82B366;">3</div>
-                <div class="color" style="background-color: #B85450;">4</div>
-                <div class="color" style="background-color: #9673A6;">5</div>
-                <div class="color" style="background-color: #FFFF88;">6</div>
+                <div class="color" id='color_1' style="background-color: #D79B00;">1</div>
+                <div class="color" id='color_2' style="background-color: #6C8EBF;">2</div>
+                <div class="color" id='color_3' style="background-color: #82B366;">3</div>
+                <div class="color" id='color_4' style="background-color: #B85450;">4</div>
+                <div class="color" id='color_5' style="background-color: #9673A6;">5</div>
+                <div class="color" id='color_6' style="background-color: #FFFF88;">6</div>
             </div>
         </div>
         <div id='debug_block' style='width:384px;position:absolute;top:512px;left:932px;' align='center'></div>
@@ -190,12 +195,16 @@ export default class Test extends Vue {
     point_size = 1          // size of a point
     receptive_ratio = 2     // ratio of receptive field
     line_width = 1          // size of line
-    style_list = ['#D79B00', '#6C8EBF', '#82B366', '#B85450', '#9673A6', '#FFFF88']
+    // style_list = ['#D79B00', '#6C8EBF', '#82B366', '#B85450', '#9673A6', '#FFFF88']
+    style_list = ['#FF0000', '#00FF00', '#0000FF', '#800080', '#FFA500', '#FFFF00']
     // style_list = []
     // default_style = '#0197F6'
     // stroke_style = '#ff0033'    // color of lines
     upload_button: any          // upload_button
     upload_json_button: any     // upload_json_button
+    //
+    dilate_max_objs: any
+    dilate_thres: any
     comp_force_range: any
     show_anno: any
     // adjust_force_range: any
@@ -211,7 +220,6 @@ export default class Test extends Vue {
         'insert_mode': '通过点击任意多边形顶点在附近增加顶点，q键退出当前模式',
         'region_mode': '鼠标左键选择矩形框的两个边界点以指定区域，q键退出当前模式',
         'prompt_mode': '鼠标左键选择前景点，右键选择背景点，c键完成标注，u键回退，q键退出',
-        // 'bbox_pred_mode': 'Predict mode: you can draw a bbox to ask ML-program for a predicted result',
     }
 
 
@@ -249,6 +257,7 @@ export default class Test extends Vue {
     }
 
     dilateAnno() {
+        this.status.innerHTML = '预测中，请稍后'
         axios
             .post(
                 backend_address + '/get_more_sam_pred',
@@ -258,14 +267,45 @@ export default class Test extends Vue {
                     'collection_name': collection_name,
                     'image_name': this.image_name,
                     'compress_degree': parseInt(this.comp_force_range.value, 10),
+                    'max_objs': parseInt(this.dilate_max_objs.value, 10),
+                    'sim_thres': parseInt(this.dilate_thres.value, 10) / 10,
                 },
             )
             .then(response => {
+                this.status.innerHTML = this.descriptions['drag_mode']
                 this.annotation = {}
                 this.annotations = response.data
                 this.drawImageAnno()
             })
             .catch(error => {
+                this.status.innerHTML = this.descriptions['drag_mode']
+                console.log(error)
+            })
+            .finally(() => {})
+    }
+
+    erodeAnno() {
+        this.status.innerHTML = '预测中，请稍后'
+        axios
+            .post(
+                backend_address + '/get_less_sam_pred',
+                {
+                    'token': token,
+                    'sam_type': this.sam_selecter.options[this.sam_selecter.selectedIndex].value,
+                    'collection_name': collection_name,
+                    'image_name': this.image_name,
+                    'compress_degree': parseInt(this.comp_force_range.value, 10),
+                    'anno': this.annotations,
+                },
+            )
+            .then(response => {
+                this.status.innerHTML = this.descriptions['drag_mode']
+                this.annotation = {}
+                this.annotations = response.data
+                this.drawImageAnno()
+            })
+            .catch(error => {
+                this.status.innerHTML = this.descriptions['drag_mode']
                 console.log(error)
             })
             .finally(() => {})
@@ -792,28 +832,6 @@ export default class Test extends Vue {
         this.readImage()
     }
 
-    // onSAMChange(e: any) {
-    //     axios
-    //         .post(
-    //             backend_address + '/select_sam',
-    //             {
-    //                 'token': token,
-    //                 'collection_name': collection_name
-    //             }
-    //         )
-    //         .then(response => {
-    //             this.image_list = response.data
-    //             this.select_image_range.value = 0
-    //             this.select_image_range.min = 0
-    //             this.select_image_range.max = this.image_list.length - 1
-    //             this.updateImageSelecter()
-    //         })
-    //         .catch(error => {
-    //             console.log(error)
-    //         })
-    //         .finally(() => {})
-    // }
-
     readCollectionList() {
         console.log('Get collection list')
         axios
@@ -1249,6 +1267,9 @@ export default class Test extends Vue {
             case 'dilate_anno':
                 this.dilateAnno()
                 break
+            case 'erode_anno':
+                this.erodeAnno()
+                break
             case 'rename':
                 // 重命名
                 this.renameImage()
@@ -1374,6 +1395,7 @@ export default class Test extends Vue {
             }
         }
         this.upload_json_button = document.getElementById('upload_json')
+        const readCollectionList = this.readCollectionList.bind(this)
         this.upload_json_button.onchange = function() {
             let json_name = this.files[0]['name']
             let reader = new FileReader()
@@ -1387,7 +1409,8 @@ export default class Test extends Vue {
                         'json_name': json_name,
                     })
                     .then(response => {
-                        alert('上传成功')
+                        readCollectionList()
+                        // alert('上传成功')
                     })
                     .catch(error => {
                         console.log(error)
@@ -1548,7 +1571,8 @@ export default class Test extends Vue {
         (document.getElementById('instruct') as HTMLButtonElement).addEventListener('click', () => {this.operate('instruct')});
         (document.getElementById('sam_pred') as HTMLButtonElement).addEventListener('click', () => {this.operate('m')});
         (document.getElementById('clear_anno') as HTMLButtonElement).addEventListener('click', () => {this.operate('clear_anno')});
-        (document.getElementById('dilate_anno') as HTMLButtonElement).addEventListener('click', () => {this.operate('dilate_anno')})
+        (document.getElementById('dilate_anno') as HTMLButtonElement).addEventListener('click', () => {this.operate('dilate_anno')});
+        (document.getElementById('erode_anno') as HTMLButtonElement).addEventListener('click', () => {this.operate('erode_anno')})
     }
 
     mounted() {
@@ -1578,6 +1602,9 @@ export default class Test extends Vue {
         window.addEventListener('mousewheel', this.scrollFunc, { passive: false })
         // debug div
         this.debugdiv = document.getElementById('debug_block') as HTMLDivElement
+        // input text
+        this.dilate_max_objs = document.getElementById('dilate_max_objs')
+        this.dilate_thres = document.getElementById('dilate_thres')
         // range
         this.comp_force_range = document.getElementById('comp_force')
         this.show_anno = document.getElementById('show_anno')
@@ -1596,6 +1623,13 @@ export default class Test extends Vue {
         this.detaildiv.style.border = '1px solid #666666'
         this.detaildiv.style.position = 'absolute'
         document.body.appendChild(this.detaildiv)
+        // 更新标签颜色表
+        for (let i = 0; i < this.style_list.length; i++) {
+            let element = document.getElementById('color_' + (i + 1))
+            if (element instanceof HTMLElement) {
+                element.style.backgroundColor = this.style_list[i]
+            }
+        }
         // Initialize gloabl variables
         this.annotation = {}
         this.annotations = []
@@ -1724,6 +1758,10 @@ export default class Test extends Vue {
     width: 80px;
 }
 
+#dilate_thres {
+    width: 80px
+}
+
 /* 自定义滑块样式 */
 .select_range::-webkit-slider-thumb {
     -webkit-appearance: none; /* 隐藏默认的滑块样式 */
@@ -1805,6 +1843,15 @@ label, input, select{
     font-size: 24px;
     margin: 5px;
     color: black;
+}
+
+#dilate_max_objs {
+    width: 50px;
+    text-align: center;
+    border: 1px solid #DAE8FC;
+    border-radius:12px;
+    font: 16px Arial,sans-serif bold;
+    font-style: normal;
 }
 
 </style>

@@ -25,7 +25,8 @@ def point_selection(mask_sim, cell_radius_list, k=1):
     '''
     Params:
         mask_sim: torch.tensor(B, H, W) dtype=torch.float
-        topk: int
+        cell_radius_list:
+        k: int
     Return:
         topk_b: np.array(B)         dtype=int
         topk_xy: np.array(K, 2)     dtype=np.float32
@@ -168,6 +169,8 @@ def get_weights(logits_list, gt_masks, base_lr, num_epochs, log_freq):
     #
     optimizer = torch.optim.Adam(mask_weights.parameters(), lr=base_lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, num_epochs)
+    # TODO: 自定义
+    num_epochs = min(num_epochs, int(1000 / len(logits_list)))
     for epoch_ind in range(num_epochs):
         for iter_ind in range(len(logits_list)):
             # Weighted sum three-scale masks
@@ -265,16 +268,16 @@ def get_mask(predictor, topk_xy, topk_label, weights_np, cell_radius):
     return masks[best_idx]  # (ori_h, ori_w)
 
 
-def find_cells(predictor, weights_list, cell_feat_matrix, cell_radius_list, max_objs):
+def find_cells(predictor, weights_list, cell_feat_matrix, cell_radius_list, max_objs, sim_thres, ori_union_mask):
     '''
     Params:
         predictor: SAMPredictor
-        weights_list: np.ndarray(M, 3, 1, 1)    dtype=np.float32
-        cell_feat_matrix: torch.tensor(M, N, C) dtype=torch.float   device=gpu
-            M: number of cell classes
-            N: number of shots
-        cell_radius_list: np.ndarray(M, )    dtype=np.float32
+        weights_list: np.ndarray(#classes, 3, 1, 1)    dtype=np.float32
+        cell_feat_matrix: #classes * torch.tensor(N_cls, C) dtype=torch.float   device=gpu
+            N_cls: number of shots
+        cell_radius_list: np.ndarray(#classes, )    dtype=np.float32
         max_objs: int   maximal number of objects
+        ori_union_mask: np.ndarray(H, W)
     Return:
         masks: np.ndarray(#instances, H, W)  dtype=np.int32  instance mask
         cls_list: np.ndarray(#instances, )
@@ -282,32 +285,39 @@ def find_cells(predictor, weights_list, cell_feat_matrix, cell_radius_list, max_
         prompts: (points, labels)
     '''
     #
-    M, N, C = cell_feat_matrix.shape
+    class_ind_list = [
+        ind
+        for ind in range(len(cell_feat_matrix))
+        for _ in range(len(cell_feat_matrix[ind]))
+    ]
+    cell_feat_matrix = torch.cat(cell_feat_matrix, dim=0)  # (N, C)
+    N, C = cell_feat_matrix.shape
     # Prepare intermediate variables
     masks = []
     cls_list = []
     coefs = []
     prompts = ([], [])
     # Image feature encoding
-    test_feat = predictor.features.squeeze()  # (C, 64, 64)
+    test_feat = predictor.features.squeeze(0)  # (C, 64, 64)
     # Cosine similarity
     _, feat_h, feat_w = test_feat.shape
     test_feat = F.normalize(test_feat, p=2, dim=0)
     test_feat = test_feat.view(C, -1)
-    sim = cell_feat_matrix.view(-1, C) @ test_feat  # (M * N, 64 * 64)
-    sim = sim.view(-1, 1, feat_h, feat_w)  # (M * N, 1, 64, 64)
+    sim = cell_feat_matrix @ test_feat  # (N, 64 * 64)
+    sim = sim.view(-1, 1, feat_h, feat_w)  # (N, 1, 64, 64)
     #
     sim = predictor.model.postprocess_masks(
         sim,
         input_size=predictor.input_size,
         original_size=predictor.original_size
-    )[:, 0]  # (M * N, ori_h, ori_w)
-    sim = torch.mean(sim.view(M, N, *sim.shape[1 :]), dim=1)  # (M, ori_h, ori_w)
+    ).squeeze(1)  # (N, ori_h, ori_w)
+    sim[:, torch.as_tensor(ori_union_mask).to(sim.device)] = -1
+    #
     for inst_ind in range(max_objs):
         # Positive location prior
         topk_mn, topk_xy, topk_label = point_selection(sim, cell_radius_list, k=1)
         # class_ind = (topk_mn // N)[0]
-        class_ind = topk_mn[0]
+        class_ind = class_ind_list[topk_mn[0].item()]
         new_mask = get_mask(predictor, topk_xy, topk_label, weights_list[class_ind], cell_radius_list[class_ind])
         # if (np.sum(new_mask & fg_mask_list[class_ind]) / np.sum(new_mask)) > 0.8:
         #     break
@@ -322,8 +332,8 @@ def find_cells(predictor, weights_list, cell_feat_matrix, cell_radius_list, max_
             torch.as_tensor(new_mask).float().to(sim.device)[None, None],
             kernel_size=5, stride=1, padding=2
         )[0, 0]
-        sim[class_ind, remove_mask > 0] = torch.min(sim)
-        if sim.max() < 0.5:
+        sim[:, remove_mask > 0] = -1
+        if sim.max() < sim_thres:
             break
     #
     masks = np.array(masks)
@@ -333,12 +343,12 @@ def find_cells(predictor, weights_list, cell_feat_matrix, cell_radius_list, max_
     return masks, cls_list, coefs, prompts
 
 
-def find_remaining_cells(predictor, ori_masks, ori_cls_list):
+def find_remaining_cells(predictor, ori_masks, ori_cls_list, max_objs=20, sim_thres=0.5):
     '''
     Params:
         predictor: SamPredictor, we assume that predictor.is_image_set == True
-        ori_masks: (#ori_instances, H, W)
-        ori_cls_list: (#ori_instances, )
+        ori_masks: np.ndarray(#ori_instances, H, W)
+        ori_cls_list: np.ndarray(#ori_instances, )
     Return:
         masks: (#instances, H, W)
         cls_list: (#instances, )
@@ -346,8 +356,10 @@ def find_remaining_cells(predictor, ori_masks, ori_cls_list):
     lr = 1e-1
     num_epochs = 200
     log_freq = 100
-    max_objs = 20
     assert predictor.is_image_set
+    ori_union_mask = (np.max(ori_masks, axis=0) > 0)  # (H, W)
+    C = predictor.features.shape[1]
+    device = predictor.features.device
     # Collect support set
     print('======> Collect support set')
     num_fg_classes = np.max(ori_cls_list)
@@ -373,20 +385,24 @@ def find_remaining_cells(predictor, ori_masks, ori_cls_list):
         cell_radius_list[class_ind].append(np.sqrt(np.sum(ori_masks[cell_ind]) / np.pi))
     for class_ind in range(num_fg_classes):
         # shape = (nshots, C)
-        cell_feat_matrix[class_ind] = torch.cat(cell_feat_matrix[class_ind], dim=0)[None]
+        if len(cell_feat_matrix[class_ind]) == 0:
+            cell_feat_matrix[class_ind] = torch.zeros(0, C, device=device)
+            continue
+        cell_feat_matrix[class_ind] = torch.cat(cell_feat_matrix[class_ind], dim=0)
         print('Cell class', class_ind + 1, 'Cell feats', cell_feat_matrix[class_ind].shape)
-    # TODO: 修改cell_feat_matrix
-    cell_feat_matrix = torch.cat(cell_feat_matrix, dim=0)
     cell_radius_list = np.array([np.mean(cell_radius) for cell_radius in cell_radius_list])
     print('Cell radius', cell_radius_list)
     # Train weights
     weights_list = []
     for class_ind in range(num_fg_classes):
-        weights = get_weights(
-            logits_matrix[class_ind],
-            gt_mask_matrix[class_ind],
-            lr, num_epochs, log_freq
-        )
+        if len(logits_matrix[class_ind]) == 0:
+            weights = np.ones((3, 1, 1))
+        else:
+            weights = get_weights(
+                logits_matrix[class_ind],
+                gt_mask_matrix[class_ind],
+                lr, num_epochs, log_freq
+            )
         weights_list.append(weights)
     weights_list = np.array(weights_list)
     print('======> Weights')
@@ -395,7 +411,7 @@ def find_remaining_cells(predictor, ori_masks, ori_cls_list):
     # Inference
     print('======> Inference')
     masks, cls_list, coefs, prompts = find_cells(
-        predictor, weights_list, cell_feat_matrix, cell_radius_list, max_objs
+        predictor, weights_list, cell_feat_matrix, cell_radius_list, max_objs, sim_thres, ori_union_mask
     )
     # TODO: filter out the ori_masks from masks
     return masks, cls_list

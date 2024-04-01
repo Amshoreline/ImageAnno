@@ -18,7 +18,8 @@ CORS(app)
 from gevent import pywsgi
 #
 from sam_predictor import get_predictor, get_contour
-from fewshot_sam_predictor import find_remaining_cells
+from sam_dilator import find_remaining_cells
+from sam_eroder import remove_redundant_cells
 
 
 # Global variables
@@ -249,6 +250,8 @@ def get_more_sam_pred():
     collection_name = params['collection_name']
     image_name = params['image_name']
     compress_degree = params['compress_degree']
+    max_objs = params['max_objs']
+    sim_thres = params['sim_thres']
     # get height and width
     with open(f'data/{user}/{collection_name}/info.json', 'r') as reader:
         image_list = eval(reader.read())
@@ -259,10 +262,10 @@ def get_more_sam_pred():
     json_name = image_name.replace('.jpg', '.json')
     json_path = f'data/{user}/{collection_name}/jsons/{json_name}'
     with open(json_path, 'r') as reader:
-        contours = eval(reader.read())
+        ori_contours = eval(reader.read())
     ori_masks = []
     ori_cls_list = []
-    for contour in contours:
+    for contour in ori_contours:
         mask = np.zeros((height, width), dtype=np.uint8)
         contour_arr = np.round([[item['x'], item['y']] for item in contour['path']]).astype(np.int32)
         cv2.fillPoly(mask, [contour_arr], 1)
@@ -280,14 +283,77 @@ def get_more_sam_pred():
         sam_model.image_path = image_path
         sam_model.set_image(image)
     # genereate masks
-    masks, cls_list = find_remaining_cells(sam_model, ori_masks, ori_cls_list)
+    masks, cls_list = find_remaining_cells(sam_model, ori_masks, ori_cls_list, max_objs, sim_thres)
     # convert masks to json
     contours = []
     for mask, cls_id in zip(masks, cls_list):
         contour = get_contour(mask, compress_degree)
         contour['label'] = str(cls_id)
         contours.append(contour)
+    return json.dumps(ori_contours + contours).encode()
+
+
+@app.route('/get_less_sam_pred', methods=['POST'])
+def get_less_sam_pred():
+    global sam_model_dict
+    #
+    params = request.get_json(silent=True)
+    user = token2user[params['token']]
+    # parse parameters
+    sam_type = params['sam_type']
+    collection_name = params['collection_name']
+    image_name = params['image_name']
+    compress_degree = params['compress_degree']
+    new_contours = params['anno']
+    # get height and width
+    with open(f'data/{user}/{collection_name}/info.json', 'r') as reader:
+        image_list = eval(reader.read())
+    for item in image_list:
+        if item['image_name'] == image_name:
+            height, width = item['height'], item['width']
+    # prepare masks
+    print('prepare masks')
+    json_name = image_name.replace('.jpg', '.json')
+    json_path = f'data/{user}/{collection_name}/jsons/{json_name}'
+    with open(json_path, 'r') as reader:
+        ori_contours = eval(reader.read())
+    ori_masks, new_masks = [], []
+    ori_cls_ids, new_cls_ids = [], []
+    for masks, cls_ids, contours in zip([ori_masks, new_masks], [ori_cls_ids, new_cls_ids], [ori_contours, new_contours]):
+        for contour in contours:
+            mask = np.zeros((height, width), dtype=np.uint8)
+            contour_arr = np.round([[item['x'], item['y']] for item in contour['path']]).astype(np.int32)
+            cv2.fillPoly(mask, [contour_arr], 1)
+            masks.append(mask)
+            cls_ids.append(int(contour['label']))
+    ori_masks = np.array(ori_masks).astype(bool)
+    ori_cls_ids = np.array(ori_cls_ids)
+    new_masks = np.array(new_masks).astype(bool)
+    new_cls_ids = np.array(new_cls_ids)
+    # set model and image
+    print('set model and image')
+    if not sam_type in sam_model_dict:
+        sam_model_dict[sam_type] = get_predictor(sam_type)
+    sam_model = sam_model_dict[sam_type]
+    image_path = f'data/{user}/{collection_name}/images/{image_name}'
+    image = np.array(Image.open(image_path))
+    if len(image.shape) == 2:
+        image = np.concatenate([image[..., None], ] * 3, axis=-1)
+    if sam_model.image_path != image_path:
+        sam_model.image_path = image_path
+        sam_model.set_image(image)
+    # genereate masks
+    print('generate masks')
+    masks, cls_list = remove_redundant_cells(sam_model, ori_masks, ori_cls_ids, new_masks, new_cls_ids)
+    # convert masks to json
+    print('convert masks to json')
+    contours = []
+    for mask, cls_id in zip(masks, cls_list):
+        contour = get_contour(mask, compress_degree)
+        contour['label'] = str(cls_id)
+        contours.append(contour)
     return json.dumps(contours).encode()
+
 
 
 @app.route('/upload_image', methods=['POST'])
@@ -308,8 +374,9 @@ def upload_image():
     # Get new_height, new_width and pil_image
     height, width = image.shape[: 2]
     if max(height, width) > max_len:
-        new_height = int(height / (max(height, width) / max_len))
-        new_width = int(width / (max(height, width) / max_len))
+        ratio = max_len / max(height, width)
+        new_height = int(height * ratio)
+        new_width = int(width * ratio)
     else:
         new_height = height
         new_width = width
@@ -317,7 +384,6 @@ def upload_image():
         pil_image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_GRAY2RGB))
     else:
         pil_image = Image.fromarray(image)
-    pil_image.resize((new_width, new_height))
     # Update image_list
     with open(f'data/{user}/{collection_name}/info.json', 'r') as reader:
         image_list = eval(reader.read())
@@ -332,7 +398,7 @@ def upload_image():
     with open(f'data/{user}/{collection_name}/info.json', 'w') as writer:
         writer.write(json.dumps(image_list, indent=4))
     # Save image
-    pil_image.save(image_path)
+    pil_image.resize((new_width, new_height)).save(image_path)
     return image_name.encode()
 
 
@@ -428,6 +494,7 @@ def calc_volume():
     if len(content) == 0:
         return '当前没有标注'.encode()
     else:
+        content.sort(key=lambda x: x['label'])
         labels = [dict_['label'] for dict_ in content]
         paths = [dict_['path'] for dict_ in content]
         contours = [
@@ -438,9 +505,9 @@ def calc_volume():
             for path in paths
         ]
         areas = [cv2.contourArea(contour) for contour in contours]
-        res = '标签             面积'
-        for label, area in zip(labels, areas):
-            res += f'\n  {label}              {area:.2f}'
+        res = '          标签             面积'
+        for ind, (label, area) in enumerate(zip(labels, areas)):
+            res += f'\n{ind}/{len(labels)}      {label}              {area:.2f}'
         return res.encode()
 
 
