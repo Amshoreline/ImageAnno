@@ -644,7 +644,7 @@ export default class Test extends Vue {
     }
 
     readJson(image_name: string) {
-        axios
+        return axios
             .post(
                 backend_address + '/get_anno',
                 {
@@ -673,7 +673,7 @@ export default class Test extends Vue {
 
     readImage() {
         console.log('readImage', this.image_name)
-        axios
+        return axios
             .post(
                 backend_address + '/get_image',
                 {
@@ -687,7 +687,7 @@ export default class Test extends Vue {
                 let encryptedBytes = response.data
                 this.image_url = 'data:image/jpeg;base64,' + encryptedBytes.toString('base64')
                 this.image.src = this.image_url
-                this.readJson(this.image_name)
+                const promise = this.readJson(this.image_name)
                 this.status.innerHTML = this.descriptions['drag_mode']
                 // 这个操作会降低切换图片的速度
                 if (this.image_name.length > 1) {
@@ -695,6 +695,7 @@ export default class Test extends Vue {
                     this.sam_set_image_timer = setTimeout(this.samSetImage, 1500)
                 }
                 // this.samSetImage()
+                return promise
             })
             .catch(error => {
                 console.log(error)
@@ -757,7 +758,7 @@ export default class Test extends Vue {
         this.image_selecter.selectedIndex = match_index
         this.image_name = this.image_selecter.options[this.image_selecter.selectedIndex].value
         // Read image
-        this.readImage()
+        return this.readImage()
     }
 
     nextImage() {
@@ -834,12 +835,12 @@ export default class Test extends Vue {
 
     readCollectionList() {
         console.log('Get collection list')
-        axios
+        return axios
             .post(backend_address + '/get_collection_list', {'token': token})
             .then(response => {
                 this.collection_list = response.data
                 this.updateCollectionSelecter()
-                this.readImageList()
+                return this.readImageList()
             })
             .catch(error => {
                 console.log(error)
@@ -849,14 +850,14 @@ export default class Test extends Vue {
 
     readImageList() {
         console.log('Get image list in collection:', collection_name)
-        axios
+        return axios
             .post(backend_address + '/get_image_list', {'token': token, 'collection_name': collection_name})
             .then(response => {
                 this.image_list = response.data
                 this.select_image_range.value = 0
                 this.select_image_range.min = 0
                 this.select_image_range.max = this.image_list.length - 1
-                this.updateImageSelecter()
+                return this.updateImageSelecter()
             })
             .catch(error => {
                 console.log(error)
@@ -1370,6 +1371,8 @@ export default class Test extends Vue {
             this.path_idx_map.push(path_idx_arr)
             this.center_map.push(center_arr)
         }
+        const self = this
+        //
         this.upload_button = document.getElementById('upload')
         this.upload_button.onchange = function() {
             let image_name = this.files[0]['name']
@@ -1386,7 +1389,25 @@ export default class Test extends Vue {
                         },
                     )
                     .then(response => {
-                        alert('上传成功，请刷新网页')
+                        console.log('uploaded')
+                        self.readCollectionList().then(async () => {
+                            console.log('finish readCollectionList')
+                            // await nextTick()
+                            // 获取HTMLSelectElement元素
+                            let image_selecter = document.getElementById('image_selecter') as HTMLSelectElement
+                            // 遍历每个选项
+                            for (let i = 0; i < image_selecter.options.length; i++) {
+                                // 检查每个选项的文本是否为'233'
+                                console.log(image_selecter.options[i].text + ' vs ' + image_name)
+                                if (image_selecter.options[i].text === image_name) {
+                                    // 将当前选项设置为该选项
+                                    image_selecter.selectedIndex = i
+                                    break // 找到后跳出循环
+                                }
+                            }
+                            self.onImageChange('')
+                        })
+                        // alert('上传成功，请刷新网页')
                     })
                     .catch(error => {
                         console.log(error)
@@ -1395,7 +1416,6 @@ export default class Test extends Vue {
             }
         }
         this.upload_json_button = document.getElementById('upload_json')
-        const readCollectionList = this.readCollectionList.bind(this)
         this.upload_json_button.onchange = function() {
             let json_name = this.files[0]['name']
             let reader = new FileReader()
@@ -1409,7 +1429,7 @@ export default class Test extends Vue {
                         'json_name': json_name,
                     })
                     .then(response => {
-                        readCollectionList()
+                        self.readCollectionList()
                         // alert('上传成功')
                     })
                     .catch(error => {

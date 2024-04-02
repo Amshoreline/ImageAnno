@@ -313,26 +313,28 @@ def find_cells(predictor, weights_list, cell_feat_matrix, cell_radius_list, max_
     ).squeeze(1)  # (N, ori_h, ori_w)
     sim[:, torch.as_tensor(ori_union_mask).to(sim.device)] = -1
     #
-    for inst_ind in range(max_objs):
+    new_union_mask = np.zeros(sim.shape[1 :], dtype=bool)
+    for inst_ind in trange(max_objs):
         # Positive location prior
         topk_mn, topk_xy, topk_label = point_selection(sim, cell_radius_list, k=1)
         # class_ind = (topk_mn // N)[0]
         class_ind = class_ind_list[topk_mn[0].item()]
         new_mask = get_mask(predictor, topk_xy, topk_label, weights_list[class_ind], cell_radius_list[class_ind])
-        # if (np.sum(new_mask & fg_mask_list[class_ind]) / np.sum(new_mask)) > 0.8:
-        #     break
-        # Store the intermediate results
-        masks.append(new_mask)
-        cls_list.append(class_ind + 1)
-        coefs.append(sim.max().item())
-        prompts[0].append(topk_xy)
-        prompts[1].append(topk_label)
         # Post process the similarity mask
         remove_mask = F.max_pool2d(
             torch.as_tensor(new_mask).float().to(sim.device)[None, None],
             kernel_size=5, stride=1, padding=2
         )[0, 0]
         sim[:, remove_mask > 0] = -1
+        # Store the intermediate results
+        if np.sum(new_mask & new_union_mask) / np.sum(new_mask) < 0.2:
+            masks.append(new_mask)
+            cls_list.append(class_ind + 1)
+            coefs.append(sim.max().item())
+            prompts[0].append(topk_xy)
+            prompts[1].append(topk_label)
+        new_union_mask = new_union_mask | new_mask
+        #
         if sim.max() < sim_thres:
             break
     #
