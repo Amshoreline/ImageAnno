@@ -66,19 +66,27 @@ def remove_redundant_cells(predictor, ori_masks, ori_cls_ids, new_masks, new_cls
         cls_id2neg_feats[cls_id] = torch.cat(cls_id2neg_feats[cls_id], dim=1)
         print('\t', cls_id, cls_id2neg_feats[cls_id].shape)
     # get cell feats
+    print('Get cell feats')
     valid_mask = np.ones(len(new_cls_ids), dtype=bool)
-    torch_new_masks = torch.as_tensor(new_masks).to(device)
+    torch_new_masks = torch.as_tensor(new_masks).to(device)  # (#masks, H, W)
+    feat_maps = F.normalize(feat_maps, dim=0, p=2)
     for ind, (mask, cls_id) in enumerate(zip(torch_new_masks, new_cls_ids)):
         if not cls_id in cls_id2neg_feats:
             continue
-        mask = mask[None]
-        mask_sum = mask.sum()
-        #
-        feat = torch.sum(
-            mask * feat_maps,
-            dim=(1, 2)
-        ) / mask_sum  # (256, )
-        feat = F.normalize(feat, dim=0, p=2)
+        # mask = mask[None]
+        # mask_sum = mask.sum()
+        # #
+        # feat = torch.sum(
+        #     mask * feat_maps,
+        #     dim=(1, 2)
+        # ) / mask_sum  # (256, )
+        # feat = F.normalize(feat, dim=0, p=2)
+        ys, xs = torch.where(mask)
+        feat = feat_maps[
+            :,
+            ys.float().mean().round().long().item(),
+            xs.float().mean().round().long().item()
+        ]
         #
         posenc = torch.sum(
             mask * posenc_maps,
