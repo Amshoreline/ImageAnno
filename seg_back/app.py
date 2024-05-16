@@ -118,10 +118,16 @@ def get_anno_png():
     with open(json_path, 'r') as reader:
         contours = eval(reader.read())
     # Convert json to mask
+    label2color = {
+        '1': (255, 0, 0),
+        '2': (0, 255, 0),
+        '3': (0, 0, 255)
+    }
     anno_mask = np.zeros((height, width, 3), dtype=np.uint8)
     for contour in contours:
+        color = label2color.get(contour['label'], (255, 0, 0))
         contour = np.round([[item['x'], item['y']] for item in contour['path']]).astype(np.int32)
-        cv2.fillPoly(anno_mask, [contour], (128, 0, 0))
+        cv2.fillPoly(anno_mask, [contour], color)
     #
     img_byte_array = BytesIO()
     Image.fromarray(anno_mask).save(img_byte_array, format='PNG')
@@ -146,6 +152,7 @@ def save_anno():
 
 @app.route('/sam_set_image', methods=['POST'])
 def sam_set_image():
+    return 'Done'.encode()
     global sam_model_dict
     #
     params = request.get_json(silent=True)
@@ -317,6 +324,7 @@ def get_less_sam_pred():
     json_path = f'data/{user}/{collection_name}/jsons/{json_name}'
     with open(json_path, 'r') as reader:
         ori_contours = eval(reader.read())
+    print('#New Contours', len(new_contours), '#Ori Contours', len(ori_contours))
     ori_masks, new_masks = [], []
     ori_cls_ids, new_cls_ids = [], []
     for masks, cls_ids, contours in zip([ori_masks, new_masks], [ori_cls_ids, new_cls_ids], [ori_contours, new_contours]):
@@ -358,7 +366,7 @@ def get_less_sam_pred():
 
 @app.route('/upload_image', methods=['POST'])
 def upload_image():
-    max_len = 1000
+    max_len = 1024
     params = request.get_json(silent=True)
     user = token2user[params['token']]
     #
@@ -408,6 +416,7 @@ def upload_json():
     user = token2user[params['token']]
     #
     collection_name = params['collection_name']
+    json_name = params['json_name']
     if collection_name != 'test':
         return 'Not support currently'.encode()
     json_path = f'data/{user}/{collection_name}/jsons/{json_name}'

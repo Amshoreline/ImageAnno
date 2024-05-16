@@ -39,6 +39,7 @@
                 <option value='vit_b' selected>SAM-B</option>
                 <!-- <option value='vit-t'>SAM-T</option> -->
                 <option value='med-vit_b'>MedSAM-B</option>
+                <option value='UNI'>UNI</option>
             </select>
             <br>
             <label class='text'>选择序列</label>
@@ -143,7 +144,28 @@ function hexToRGBA(hex: string, alpha: number): string | null {
     return `rgba(${red}, ${green}, ${blue}, ${alpha})`
 }
 
+function throttle(fn: any, delay: number) {
+    let prev = 0
+    return (...args: any[]) => {
+        let now = new Date().getTime()
+        if (now - prev >= delay) {
+            prev = now
+            fn(...args)
+        }
+    }
+}
 
+let this_bg: any
+let this_context: any
+let this_annotations = [] as any
+let this_annotation = {} as any
+let this_sam_annotations = [] as any
+let this_anno_idx_map: any
+let this_is_bbox_map: any
+let this_path_idx_map: any
+let this_center_map: any
+// let needReDrawImageAnno = false
+// let animationFrameHandle: number | null = null
 // The main class
 export default {
 
@@ -153,17 +175,17 @@ export default {
             image_selecter: undefined as any,     // image_selecter component
             sam_selecter: undefined as any,       // sam_selecter component
             status: undefined as any,             // status component
-            bg: undefined as any,                 // bg component
-            context: undefined as any,            // context component
+            // bg: undefined as any,                 // bg component
+            // context: undefined as any,            // context component
             image_name: '', // image name
             image: new Image(),     // 'image' instance
             image_url: '233',       // filename
-            annotations: [] as any,        // a list of dict
-            annotation: {} as any,         // a dict
+            // annotations: [] as any,        // a list of dict
+            // annotation: {} as any,         // a dict
             bbox: {} as any,               // bounding box
             //
             prompt: {'points': [], 'labels': [], 'bbox': {}} as any,
-            sam_annotations: [], // SAM的预测结果
+            // sam_annotations: [], // SAM的预测结果
             sam_set_image_timer: undefined as any,  // SAM提前加载图片的倒计时
             //
             drag_index: -1, // index of the selected annotation
@@ -176,10 +198,10 @@ export default {
             debugdiv: undefined as any,           // Debug Div
 
             // two-dimentional arrays
-            anno_idx_map: undefined as any,
-            is_bbox_map: undefined as any,
-            path_idx_map: undefined as any,
-            center_map: undefined as any,
+            // anno_idx_map: undefined as any,
+            // is_bbox_map: undefined as any,
+            // path_idx_map: undefined as any,
+            // center_map: undefined as any,
 
             // function modes
             drag_mode: false,          // drag points
@@ -228,7 +250,7 @@ export default {
     methods: {
         SAMPredict() {
             if (!('xmin' in this.prompt['bbox']) && (this.prompt['points'].length == 0)) {
-                this.sam_annotations = []
+                this_sam_annotations = []
                 this.drawImageAnno()
                 return
             }
@@ -249,7 +271,7 @@ export default {
                 )
                 .then(response => {
                     this.status.innerHTML = this.descriptions['prompt_mode']
-                    this.sam_annotations = response.data
+                    this_sam_annotations = response.data
                     this.drawImageAnno()
                 })
                 .catch(error => {
@@ -276,8 +298,8 @@ export default {
                 )
                 .then(response => {
                     this.status.innerHTML = this.descriptions['drag_mode']
-                    this.annotation = {}
-                    this.annotations = response.data
+                    this_annotation = {}
+                    this_annotations = response.data
                     this.drawImageAnno()
                 })
                 .catch(error => {
@@ -298,13 +320,13 @@ export default {
                         'collection_name': collection_name,
                         'image_name': this.image_name,
                         'compress_degree': parseInt(this.comp_force_range.value, 10),
-                        'anno': this.annotations,
+                        'anno': this_annotations,
                     },
                 )
                 .then(response => {
                     this.status.innerHTML = this.descriptions['drag_mode']
-                    this.annotation = {}
-                    this.annotations = response.data
+                    this_annotation = {}
+                    this_annotations = response.data
                     this.drawImageAnno()
                 })
                 .catch(error => {
@@ -320,12 +342,12 @@ export default {
                 'width': this.image.width,
                 'height': this.image.height,
                 'ratio': min(
-                    this.bg.height / (this.image.height),
-                    this.bg.width / (this.image.width),
+                    this_bg.height / (this.image.height),
+                    this_bg.width / (this.image.width),
                 ),
             }
             console.log('Reset region')
-            console.log('bg.height = ', this.bg.height, '; bg.width = ', this.bg.width)
+            console.log('bg.height = ', this_bg.height, '; bg.width = ', this_bg.width)
             console.log('image.height = ', this.image.height, '; image.width = ', this.image.width)
             console.log('region_info = ', this.region_info['ratio'])
         },
@@ -355,7 +377,7 @@ export default {
             width = width * this.region_info['ratio']
             height = height * this.region_info['ratio']
             if (this.checkNode(xmin, ymin)) {
-                this.context.strokeRect(xmin, ymin, width, height)
+                this_context.strokeRect(xmin, ymin, width, height)
             }
         },
 
@@ -368,7 +390,7 @@ export default {
             width = width * this.region_info['ratio']
             height = height * this.region_info['ratio']
             if (this.checkNode(xmin, ymin)) {
-                this.context.fillRect(xmin, ymin, width, height)
+                this_context.fillRect(xmin, ymin, width, height)
             }
         },
 
@@ -378,12 +400,12 @@ export default {
             }
             x = (x - this.region_info['xmin']) * this.region_info['ratio']
             y = (y - this.region_info['ymin']) * this.region_info['ratio']
-            this.context.font = '16px Arial'
-            this.context.fillStyle = '#000000'
+            this_context.font = '16px Arial'
+            this_context.fillStyle = '#000000'
             if (star_label == 1) {
-                this.context.fillText('\uD83D\uDD25', x, y)
+                this_context.fillText('\uD83D\uDD25', x, y)
             } else {
-                this.context.fillText('\u2744️', x, y)
+                this_context.fillText('\u2744️', x, y)
             }
         },
 
@@ -419,8 +441,8 @@ export default {
             }
             x = (x - this.region_info['xmin']) * this.region_info['ratio']
             y = (y - this.region_info['ymin']) * this.region_info['ratio']
-            this.context.beginPath()
-            this.context.moveTo(x, y)
+            this_context.beginPath()
+            this_context.moveTo(x, y)
         },
 
         lineTo(x: number, y: number) {
@@ -429,25 +451,25 @@ export default {
             }
             x = (x - this.region_info['xmin']) * this.region_info['ratio']
             y = (y - this.region_info['ymin']) * this.region_info['ratio']
-            this.context.lineTo(x, y)
+            this_context.lineTo(x, y)
         },
 
         closePath() {
             if (!this.show_anno.checked) {
                 return
             }
-            this.context.closePath()
-            let prev_fill_style = this.context.fillStyle
-            this.context.fillStyle = hexToRGBA(prev_fill_style, 0.3)
-            this.context.fill()
-            this.context.fillStyle = prev_fill_style
+            this_context.closePath()
+            let prev_fill_style = this_context.fillStyle
+            this_context.fillStyle = hexToRGBA(prev_fill_style, 0.3)
+            this_context.fill()
+            this_context.fillStyle = prev_fill_style
         },
 
         stroke() {
             if (!this.show_anno.checked) {
                 return
             }
-            this.context.stroke()
+            this_context.stroke()
         },
 
         maskAllModes() {
@@ -482,26 +504,34 @@ export default {
                 int_label = 1
             }
             // console.log('Set style', this.style_list[int_label - 1])
-            this.context.fillStyle = this.style_list[int_label - 1]
-            this.context.strokeStyle = this.style_list[int_label - 1]
+            this_context.fillStyle = this.style_list[int_label - 1]
+            this_context.strokeStyle = this.style_list[int_label - 1]
         },
 
         resetStyle() {
-            this.context.fillStyle = this.style_list[0]
-            this.context.strokeStyle = this.style_list[0]
+            this_context.fillStyle = this.style_list[0]
+            this_context.strokeStyle = this.style_list[0]
         },
 
         clearCanvas() {
             // eslint-disable-next-line
-            this.bg.height = this.bg.height // clear the canvas
-            // this.context.fillStyle = this.fill_style
-            // this.context.strokeStyle = this.stroke_style
-            this.context.lineWidth = this.line_width
+            this_bg.height = this_bg.height // clear the canvas
+            // this_context.fillStyle = this.fill_style
+            // this_context.strokeStyle = this.stroke_style
+            this_context.lineWidth = this.line_width
         },
+
+        // drawImageAnno() {
+        //     if (animationFrameHandle === null) {
+        //         this._drawImageAnno()
+        //     } else {
+        //         needReDrawImageAnno = true
+        //     }
+        // },
 
         drawImageAnno() {
             this.clearCanvas()
-            this.context.drawImage(
+            this_context.drawImage(
                 this.image,
                 this.region_info['xmin'], this.region_info['ymin'],
                 this.region_info['width'], this.region_info['height'],
@@ -509,9 +539,9 @@ export default {
                 this.region_info['height'] * this.region_info['ratio'],
             )
             this.resetStyle()
-            for (let i = 0; i < this.annotations.length; i++) {
+            for (let i = 0; i < this_annotations.length; i++) {
                 // 画点
-                let annotation: any = this.annotations[i]
+                let annotation: any = this_annotations[i]
                 this.setStyle(annotation['label'])
                 if ('path' in annotation) {
                     // 多边形
@@ -571,15 +601,15 @@ export default {
                         }
                     }
                     // 2.画线
-                    let prev_fill_style = this.context.fillStyle
-                    this.context.fillStyle = hexToRGBA(prev_fill_style, 0.3)
+                    let prev_fill_style = this_context.fillStyle
+                    this_context.fillStyle = hexToRGBA(prev_fill_style, 0.3)
                     this.fillRect(
                         annotation['bbox']['xmin'],
                         annotation['bbox']['ymin'],
                         annotation['bbox']['xmax'] - annotation['bbox']['xmin'],
                         annotation['bbox']['ymax'] - annotation['bbox']['ymin'],
                     )
-                    this.context.fillStyle = prev_fill_style
+                    this_context.fillStyle = prev_fill_style
                 }
             }
             this.resetStyle()
@@ -596,8 +626,8 @@ export default {
                 // 画SAM的prompt points
                 this.fillStar(this.prompt['points'][i]['x'], this.prompt['points'][i]['y'], this.prompt['labels'][i])
             }
-            for (let i = 0; i < this.sam_annotations.length; i++) {
-                let annotation = this.sam_annotations[i]
+            for (let i = 0; i < this_sam_annotations.length; i++) {
+                let annotation = this_sam_annotations[i]
                 console.log('Annotation', i)
                 let valid_sub_path = this.checkPath(annotation['path'])['valid_sub_path']
                 if (valid_sub_path.length >= 3) {
@@ -616,32 +646,39 @@ export default {
                     this.stroke()
                 }
             }
+            // animationFrameHandle = requestAnimationFrame(() => {
+            //     animationFrameHandle = null
+            //     if (needReDrawImageAnno) {
+            //         needReDrawImageAnno = false
+            //         this._drawImageAnno()
+            //     }
+            // })
         },
 
         drawCurAnno() {
-            if ('path' in this.annotation) {
-                for (let j = 0; j < this.annotation['path'].length; j++) {
+            if ('path' in this_annotation) {
+                for (let j = 0; j < this_annotation['path'].length; j++) {
                     this.fillRect(
-                        this.annotation['path'][j]['x'] - this.point_size / 2,
-                        this.annotation['path'][j]['y'] - this.point_size / 2,
+                        this_annotation['path'][j]['x'] - this.point_size / 2,
+                        this_annotation['path'][j]['y'] - this.point_size / 2,
                         this.point_size,
                         this.point_size,
                     )
                 }
             }
             if (
-                'path' in this.annotation
-                && this.annotation['path'].length > 0
-                && this.checkPath(this.annotation['path'])['flag']
+                'path' in this_annotation
+                && this_annotation['path'].length > 0
+                && this.checkPath(this_annotation['path'])['flag']
             ) {
                 this.moveTo(
-                    this.annotation['path'][0]['x'],
-                    this.annotation['path'][0]['y'],
+                    this_annotation['path'][0]['x'],
+                    this_annotation['path'][0]['y'],
                 )
-                for (let j = 1; j < this.annotation['path'].length; j++) {
+                for (let j = 1; j < this_annotation['path'].length; j++) {
                     this.lineTo(
-                        this.annotation['path'][j]['x'],
-                        this.annotation['path'][j]['y'],
+                        this_annotation['path'][j]['x'],
+                        this_annotation['path'][j]['y'],
                     )
                 }
             }
@@ -659,16 +696,16 @@ export default {
                 )
                 .then(response => {
                     console.log('readJson', image_name)
-                    this.annotations = response.data
-                    this.annotation = {}
+                    this_annotations = response.data
+                    this_annotation = {}
                     this.initialize()
                     this.resetRegion()
                     this.drawImageAnno()
                 })
                 .catch(error => {
                     console.log(error)
-                    this.annotations = []
-                    this.annotation = {}
+                    this_annotations = []
+                    this_annotation = {}
                     this.initialize()
                     this.drawImageAnno()
                 })
@@ -815,7 +852,7 @@ export default {
         onSelectImageMove(e: any) {
             this.detaildiv.innerHTML = this.select_image_range.value
             this.detaildiv.style.width = 12 + 12 * this.detaildiv.innerHTML.length + 'px'
-            // console.log(this.annotations[this.anno_idx_map[y][x]])
+            // console.log(this_annotations[this_anno_idx_map[y][x]])
             this.detaildiv.style.display = ''
             this.detaildiv.style.left = e.clientX + 16 + 'px'
             this.detaildiv.style.top = e.clientY + 16 + "px"
@@ -875,18 +912,18 @@ export default {
             let offset_y = e.offsetY / this.region_info['ratio'] + this.region_info['ymin']
             let x = parseInt(offset_x + '', 10)
             let y = parseInt(offset_y + '', 10)
-            if (
-                x >= 0 && y >= 0 && x < this.bg.width && y < this.bg.height
-                && this.anno_idx_map[y][x] != -1
-            ) {
-                this.setStyle(this.annotations[this.anno_idx_map[y][x]]['label'])
+            if (x < 0 || y < 0 || x >= this.image.width || y >= this.image.height)
+                return
+            //
+            if (this_anno_idx_map[y][x] != -1) {
+                this.setStyle(this_annotations[this_anno_idx_map[y][x]]['label'])
                 this.fillRect(
-                    this.center_map[y][x][0] - this.point_size,
-                    this.center_map[y][x][1] - this.point_size,
+                    this_center_map[y][x][0] - this.point_size,
+                    this_center_map[y][x][1] - this.point_size,
                     this.point_size * 2, this.point_size * 2,
                 )
                 this.resetStyle()
-                this.detaildiv.innerHTML = this.annotations[this.anno_idx_map[y][x]]['label']
+                this.detaildiv.innerHTML = this_annotations[this_anno_idx_map[y][x]]['label']
                 this.detaildiv.style.width = 12 + 12 * this.detaildiv.innerHTML.length + 'px'
                 this.detaildiv.style.display = ''
                 this.detaildiv.style.left = e.clientX + 16 + 'px'
@@ -896,27 +933,27 @@ export default {
             }
             //
             if (this.draw_polygon_mode) {
-                if (this.annotation['path'].length != 0) {
+                if (this_annotation['path'].length != 0) {
                     this.drawCurAnno()
                     this.lineTo(offset_x, offset_y)
                     this.stroke()
                 }
                 if (
-                    this.annotation['path'].length > 3
-                    && Math.abs(offset_x - this.annotation['path'][0]['x']) < this.point_size
-                    && Math.abs(offset_y - this.annotation['path'][0]['y']) < this.point_size
+                    this_annotation['path'].length > 3
+                    && Math.abs(offset_x - this_annotation['path'][0]['x']) < this.point_size
+                    && Math.abs(offset_y - this_annotation['path'][0]['y']) < this.point_size
                 ) {
                     this.fillRect(
-                        this.annotation['path'][0]['x'] - this.point_size,
-                        this.annotation['path'][0]['y'] - this.point_size,
+                        this_annotation['path'][0]['x'] - this.point_size,
+                        this_annotation['path'][0]['y'] - this.point_size,
                         this.point_size * 2,
                         this.point_size * 2,
                     )
                 }
             } else if (this.insert_mode) {
-                if (this.anno_idx_map[y][x] != -1 && !this.is_bbox_map[y][x]) {
-                    let annotation = this.annotations[this.anno_idx_map[y][x]]
-                    let path_idx = (this.path_idx_map[y][x] - 1 + annotation['path'].length) % annotation['path'].length
+                if (this_anno_idx_map[y][x] != -1 && !this_is_bbox_map[y][x]) {
+                    let annotation = this_annotations[this_anno_idx_map[y][x]]
+                    let path_idx = (this_path_idx_map[y][x] - 1 + annotation['path'].length) % annotation['path'].length
                     this.setStyle(annotation['label'])
                     this.fillRect(
                         annotation['path'][path_idx]['x'] - this.point_size,
@@ -938,24 +975,24 @@ export default {
                     if (this.drag_bbox) {
                         if (this.point_idx == 0) {
                             // 左上角
-                            this.annotation['bbox']['xmin'] = offset_x
-                            this.annotation['bbox']['ymin'] = offset_y
+                            this_annotation['bbox']['xmin'] = offset_x
+                            this_annotation['bbox']['ymin'] = offset_y
                         } else if (this.point_idx == 1) {
                             // 右上角
-                            this.annotation['bbox']['xmax'] = offset_x
-                            this.annotation['bbox']['ymin'] = offset_y
+                            this_annotation['bbox']['xmax'] = offset_x
+                            this_annotation['bbox']['ymin'] = offset_y
                         } else if (this.point_idx == 2) {
                             // 左下角
-                            this.annotation['bbox']['xmin'] = offset_x
-                            this.annotation['bbox']['ymax'] = offset_y
+                            this_annotation['bbox']['xmin'] = offset_x
+                            this_annotation['bbox']['ymax'] = offset_y
                         } else if (this.point_idx == 3) {
                             // 右下角
-                            this.annotation['bbox']['xmax'] = offset_x
-                            this.annotation['bbox']['ymax'] = offset_y
+                            this_annotation['bbox']['xmax'] = offset_x
+                            this_annotation['bbox']['ymax'] = offset_y
                         }
                     } else {
-                        this.annotation['path'][this.point_idx]['x'] = offset_x
-                        this.annotation['path'][this.point_idx]['y'] = offset_y
+                        this_annotation['path'][this.point_idx]['x'] = offset_x
+                        this_annotation['path'][this.point_idx]['y'] = offset_y
                     }
                 }
             }
@@ -975,13 +1012,16 @@ export default {
             let offset_y = e.offsetY / this.region_info['ratio'] + this.region_info['ymin']
             let x = parseInt(offset_x + '', 10)
             let y = parseInt(offset_y + '', 10)
+            if (x < 0 || y < 0 || x >= this.image.width || y >= this.image.height)
+                return
+            //
             if (this.draw_polygon_mode) {
                 if (
                     e.button == 2
                     || (
-                        this.annotation['path'].length > 2
-                        && Math.abs(offset_x - this.annotation['path'][0]['x']) < this.point_size
-                        && Math.abs(offset_y - this.annotation['path'][0]['y']) < this.point_size
+                        this_annotation['path'].length > 2
+                        && Math.abs(offset_x - this_annotation['path'][0]['x']) < this.point_size
+                        && Math.abs(offset_y - this_annotation['path'][0]['y']) < this.point_size
                     )
                 ) {
                     this.operate('c')
@@ -991,19 +1031,19 @@ export default {
                     // this.closePath()
                     // this.stroke()
                     // let anno_label = prompt('请输入当前标注的标签[1, 2, 3, 4, 5, 6]')
-                    // this.annotation['label'] = anno_label
-                    // this.annotations.push(this.annotation)
-                    // this.annotation = {}
-                } else if (this.annotation['path'].length == 0) {
+                    // this_annotation['label'] = anno_label
+                    // this_annotations.push(this_annotation)
+                    // this_annotation = {}
+                } else if (this_annotation['path'].length == 0) {
                     // 第一个点
-                    this.annotation['path'].push({
+                    this_annotation['path'].push({
                         'x': offset_x,
                         'y': offset_y,
                     })
                     this.moveTo(offset_x, offset_y)
                 } else {
                     // 点击第二、三...个点
-                    this.annotation['path'].push({
+                    this_annotation['path'].push({
                         'x': offset_x,
                         'y': offset_y,
                     })
@@ -1013,27 +1053,27 @@ export default {
                 }
             } else if (this.delete_mode) {
                 // 删除标注
-                if (this.anno_idx_map[y][x] != -1) {
+                if (this_anno_idx_map[y][x] != -1) {
                     console.log('delete')
-                    this.annotations.splice(this.anno_idx_map[y][x], 1)
+                    this_annotations.splice(this_anno_idx_map[y][x], 1)
                     this.maskAllModes()
-                    this.annotation = {}
+                    this_annotation = {}
                     this.drawImageAnno()
                 }
             } else if (this.insert_mode) {
-                if (this.anno_idx_map[y][x] != -1 && !this.is_bbox_map[y][x]) {
+                if (this_anno_idx_map[y][x] != -1 && !this_is_bbox_map[y][x]) {
                     console.log('adding point')
                     this.maskAllModes()
                     this.drag_mode = true
-                    this.annotation = this.annotations[this.anno_idx_map[y][x]]
-                    this.point_idx = this.path_idx_map[y][x]
-                    this.annotation['path'].splice(this.point_idx, 0, {'x': x, 'y': y})
+                    this_annotation = this_annotations[this_anno_idx_map[y][x]]
+                    this.point_idx = this_path_idx_map[y][x]
+                    this_annotation['path'].splice(this.point_idx, 0, {'x': x, 'y': y})
                 }
             } else if (this.pop_mode) {
-                if (this.anno_idx_map[y][x] != -1 && !this.is_bbox_map[y][x]) {
-                    let annotation = this.annotations[this.anno_idx_map[y][x]]
+                if (this_anno_idx_map[y][x] != -1 && !this_is_bbox_map[y][x]) {
+                    let annotation = this_annotations[this_anno_idx_map[y][x]]
                     if (annotation['path'].length > 3) {
-                        annotation['path'].splice(this.path_idx_map[y][x], 1)
+                        annotation['path'].splice(this_path_idx_map[y][x], 1)
                     }
                     this.maskAllModes()
                 }
@@ -1055,8 +1095,8 @@ export default {
                         this.region_info['width'] = xmax - xmin
                         this.region_info['height'] = ymax - ymin
                         this.region_info['ratio'] = min(
-                            this.bg.width / this.region_info['width'],
-                            this.bg.height / this.region_info['height'],
+                            this_bg.width / this.region_info['width'],
+                            this_bg.height / this.region_info['height'],
                         )
                         this.maskAllModes()
                     } else if (this.draw_bbox_mode) {
@@ -1089,19 +1129,19 @@ export default {
             } else {
                 if (!this.drag_mode) {
                     // 选择要拖拽的点
-                    if (this.anno_idx_map[y][x] != -1) {
+                    if (this_anno_idx_map[y][x] != -1) {
                         console.log('drag_mode')
                         this.drag_mode = true
-                        this.drag_index = this.anno_idx_map[y][x]
-                        this.annotation = this.annotations[this.drag_index]
-                        this.drag_bbox = this.is_bbox_map[y][x]
-                        this.point_idx = this.path_idx_map[y][x]
+                        this.drag_index = this_anno_idx_map[y][x]
+                        this_annotation = this_annotations[this.drag_index]
+                        this.drag_bbox = this_is_bbox_map[y][x]
+                        this.point_idx = this_path_idx_map[y][x]
                     }
                 } else {
                     // 选择要拖拽到的位置
                     this.drag_mode = false
-                    this.annotation['path'][this.point_idx]['x'] = offset_x
-                    this.annotation['path'][this.point_idx]['y'] = offset_y
+                    this_annotation['path'][this.point_idx]['x'] = offset_x
+                    this_annotation['path'][this.point_idx]['y'] = offset_y
                 }
             }
             this.reinitializeMaps()
@@ -1117,7 +1157,7 @@ export default {
                     // 添加标注
                     if (this.checkAllModes()) {
                         this.draw_polygon_mode = true
-                        this.annotation = {'path': []}
+                        this_annotation = {'path': []}
                         this.status.innerHTML = this.descriptions['draw_polygon_mode']
                     }
                     break
@@ -1132,8 +1172,8 @@ export default {
                 case 'u':   // 'u' --> 'undo'
                     // 添加标注时，回退一步
                     if (this.draw_polygon_mode) {
-                        if (this.annotation['path'].length > 0) {
-                            this.annotation['path'].pop()
+                        if (this_annotation['path'].length > 0) {
+                            this_annotation['path'].pop()
                         }
                         this.drawImageAnno()
                         this.drawCurAnno()
@@ -1150,48 +1190,48 @@ export default {
                     // 完成标注
                     if (
                         this.draw_polygon_mode
-                        && 'path' in this.annotation
-                        && this.annotation['path'].length > 2
+                        && 'path' in this_annotation
+                        && this_annotation['path'].length > 2
                     ) {
                         this.maskAllModes()
                         this.drawCurAnno()
                         this.closePath()
                         this.stroke()
                         let anno_label = prompt('请输入当前标注的标签[1, 2, 3, 4, 5, 6]')
-                        this.annotation['label'] = anno_label
-                        this.annotations.push(this.annotation)
+                        this_annotation['label'] = anno_label
+                        this_annotations.push(this_annotation)
                     } else if (this.prompt_mode) {
                         // 这里隐含了draw_bbox_mode = true的情况
                         this.maskAllModes()
                         let anno_label = prompt('请输入当前标注的标签[1, 2, 3, 4, 5, 6]')
-                        for (let i = 0; i < this.sam_annotations.length; i++) {
-                            // this.sam_annotations[i]['label'] = anno_label
-                            let valid_sub_path = this.checkPath(this.sam_annotations[i]['path'])['valid_sub_path']
-                            this.annotations.push({'label': anno_label, 'path': valid_sub_path})
+                        for (let i = 0; i < this_sam_annotations.length; i++) {
+                            // this_sam_annotations[i]['label'] = anno_label
+                            let valid_sub_path = this.checkPath(this_sam_annotations[i]['path'])['valid_sub_path']
+                            this_annotations.push({'label': anno_label, 'path': valid_sub_path})
                         }
                     } else if (this.draw_bbox_mode) {
                         this.maskAllModes()
                         let anno_label = prompt('请输入当前标注的标签[1, 2, 3, 4, 5, 6]')
-                        this.annotations.push({'label': anno_label, 'bbox': this.bbox})
+                        this_annotations.push({'label': anno_label, 'bbox': this.bbox})
                     }
-                    this.annotation = {}
+                    this_annotation = {}
                     this.bbox = {}
                     this.prompt['points'] = []
                     this.prompt['labels'] = []
                     this.prompt['bbox'] = []
-                    this.sam_annotations = []
+                    this_sam_annotations = []
                     this.drawImageAnno()
                     break
                 case 'q':   // 'q' --> 'quit'
                     if (this.prompt_mode || this.draw_polygon_mode || this.draw_bbox_mode) {
                         // 退出标注
                         this.maskAllModes()
-                        this.annotation = {}
+                        this_annotation = {}
                         this.bbox = {}
                         this.prompt['points'] = []
                         this.prompt['labels'] = []
                         this.prompt['bbox'] = []
-                        this.sam_annotations = []
+                        this_sam_annotations = []
                         this.drawImageAnno()
                     } else {
                         // 重置
@@ -1205,7 +1245,7 @@ export default {
                     if (this.checkAllModes()) {
                         this.prompt_mode = true
                         this.status.innerHTML = this.descriptions['prompt_mode']
-                        this.sam_annotations = []
+                        this_sam_annotations = []
                     }
                     break
                 default:
@@ -1245,7 +1285,7 @@ export default {
                                 'token': token,
                                 'collection_name': collection_name,
                                 'image_name': this.image_name,
-                                'anno': this.annotations,
+                                'anno': this_annotations,
                             },
                         )
                         .then(response => {
@@ -1265,8 +1305,8 @@ export default {
                     break
                 case 'clear_anno':
                     // 删除所有标注
-                    this.annotation = {}
-                    this.annotations = []
+                    this_annotation = {}
+                    this_annotations = []
                     this.drawImageAnno()
                     break
                 case 'dilate_anno':
@@ -1335,7 +1375,7 @@ export default {
             let x = parseInt(offset_x + '', 10)
             let y = parseInt(offset_y + '', 10)
             if (
-                x >= 0 && y >= 0 && x < this.bg.width && y < this.bg.height
+                x >= 0 && y >= 0 && x < this_bg.width && y < this_bg.height
             ) {
                 if (e.wheelDelta) {
                     if (e.wheelDelta > 0) {
@@ -1350,30 +1390,30 @@ export default {
         // Initialize context and maps
         initialize() {
             // These two lines will be deleted in the future
-            // this.bg.height = 1024
-            // this.bg.width = 1980
+            // this_bg.height = 1024
+            // this_bg.width = 1980
             // Initialize region_info
             // this.resetRegion()
             // Initialize maps
-            this.anno_idx_map = []
-            this.is_bbox_map = []
-            this.path_idx_map = []
-            this.center_map = []
-            for (let i = 0; i < this.bg.height; i++) {
+            this_anno_idx_map = []
+            this_is_bbox_map = []
+            this_path_idx_map = []
+            this_center_map = []
+            for (let i = 0; i < this.image.height; i++) {
                 let anno_idx_arr = []
                 let is_bbox_arr = []
                 let path_idx_arr = []
                 let center_arr = []
-                for (let j = 0; j < this.bg.width; j++) {
+                for (let j = 0; j < this.image.width; j++) {
                     anno_idx_arr.push(-1)
                     is_bbox_arr.push(0)
                     path_idx_arr.push(-1)
                     center_arr.push([0, 0])
                 }
-                this.anno_idx_map.push(anno_idx_arr)
-                this.is_bbox_map.push(is_bbox_arr)
-                this.path_idx_map.push(path_idx_arr)
-                this.center_map.push(center_arr)
+                this_anno_idx_map.push(anno_idx_arr)
+                this_is_bbox_map.push(is_bbox_arr)
+                this_path_idx_map.push(path_idx_arr)
+                this_center_map.push(center_arr)
             }
             const self = this
             //
@@ -1445,27 +1485,27 @@ export default {
         },
 
         reinitializeMaps() {
-            for (let i = 0; i < this.bg.height; i++) {
-                for (let j = 0; j < this.bg.width; j++) {
-                    this.anno_idx_map[i][j] = -1
-                    this.is_bbox_map[i][j] = 0
-                    this.path_idx_map[i][j] = -1
-                    this.center_map[i][j] = [0, 0]
+            for (let i = 0; i < this.image.height; i++) {
+                for (let j = 0; j < this.image.width; j++) {
+                    this_anno_idx_map[i][j] = -1
+                    this_is_bbox_map[i][j] = 0
+                    this_path_idx_map[i][j] = -1
+                    this_center_map[i][j] = [0, 0]
                 }
             }
         },
 
         fillMap(x: number, y: number, size: number, anno_idx: number, is_rect: boolean, path_idx: number) {
             let min_i = Math.max(parseInt((y - size / 2) + '', 10), 0)
-            let max_i = Math.min(parseInt((y + size / 2) + '', 10), this.bg.height)
+            let max_i = Math.min(parseInt((y + size / 2) + '', 10), this.image.height)
             let min_j = Math.max(parseInt((x - size / 2) + '', 10), 0)
-            let max_j = Math.min(parseInt((x + size / 2) + '', 10), this.bg.width)
+            let max_j = Math.min(parseInt((x + size / 2) + '', 10), this.image.width)
             for (let i = min_i; i < max_i; i++) {
                 for (let j = min_j; j < max_j; j++) {
-                    this.anno_idx_map[i][j] = anno_idx
-                    this.is_bbox_map[i][j] = is_rect
-                    this.path_idx_map[i][j] = path_idx
-                    this.center_map[i][j] = [x, y]
+                    this_anno_idx_map[i][j] = anno_idx
+                    this_is_bbox_map[i][j] = is_rect
+                    this_path_idx_map[i][j] = path_idx
+                    this_center_map[i][j] = [x, y]
                 }
             }
         },
@@ -1603,11 +1643,11 @@ export default {
     mounted() {
         token = window.location.search.substring(1)
         // Initialize components
-        this.bg = document.getElementById('bg') as HTMLCanvasElement
-        this.context = this.bg.getContext('2d') as CanvasRenderingContext2D
-        this.bg.onmousemove = this.mouseMove
-        this.bg.onmousedown = this.mouseDown
-        this.bg.onmouseup = this.mouseUp
+        this_bg = document.getElementById('bg') as HTMLCanvasElement
+        this_context = this_bg.getContext('2d') as CanvasRenderingContext2D
+        this_bg.onmousemove = throttle(this.mouseMove.bind(this), 16)
+        this_bg.onmousedown = this.mouseDown.bind(this)
+        this_bg.onmouseup = this.mouseUp.bind(this)
         // collection selecter
         this.collection_selecter = document.getElementById('collection_selecter') as HTMLSelectElement
         this.collection_selecter.addEventListener('change', this.onCollectionChange)
@@ -1656,8 +1696,8 @@ export default {
             }
         }
         // Initialize gloabl variables
-        this.annotation = {}
-        this.annotations = []
+        this_annotation = {}
+        this_annotations = []
         this.bbox = {}
         // Read image
         // this.image_name = 'yousa.png'
@@ -1709,7 +1749,8 @@ export default {
     text-align:center;
     line-height:100%;
     padding:0.3em;
-    font:16px Arial,sans-serif bold;
+    font: Arial,sans-serif bold;
+    font-size: 14px;
     font-style:normal;
     text-decoration:none;
     margin:6px;
@@ -1737,7 +1778,8 @@ export default {
     text-align:center;
     line-height:100%;
     padding:0.3em;
-    font:16px Arial,sans-serif bold;
+    font: Arial,sans-serif bold;
+    font-size: 14px;
     font-style:normal;
     text-decoration:none;
     margin:6px;

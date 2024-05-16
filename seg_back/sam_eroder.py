@@ -28,7 +28,10 @@ def remove_redundant_cells(predictor, ori_masks, ori_cls_ids, new_masks, new_cls
     '''
     assert predictor.is_image_set
     # feat_maps.shape = (1, 256, H, W)
-    feat_maps = predictor.model.postprocess_masks(predictor.features, predictor.input_size, predictor.original_size)
+    if 'postprocess_masks' in dir(predictor.model):
+        feat_maps = predictor.model.postprocess_masks(predictor.features, predictor.input_size, predictor.original_size)
+    else:
+        feat_maps = predictor.postprocess_masks(predictor.features, predictor.input_size, predictor.original_size)
     feat_maps = feat_maps.squeeze(0)  # (256, H, W)
     device = feat_maps.device
     # add positional encoding to feature maps
@@ -58,12 +61,14 @@ def remove_redundant_cells(predictor, ori_masks, ori_cls_ids, new_masks, new_cls
         if not cls_id in cls_id2neg_feats:
             cls_id2neg_feats[cls_id] = []
         cls_id2neg_feats[cls_id].append(torch.cat([feat, posenc], dim=0)[:, None])
+    print('Neg feats')
     for cls_id in cls_id2neg_feats.keys():
         cls_id2neg_feats[cls_id] = torch.cat(cls_id2neg_feats[cls_id], dim=1)
-        print(cls_id, cls_id2neg_feats[cls_id].shape)
+        print('\t', cls_id, cls_id2neg_feats[cls_id].shape)
     # get cell feats
     valid_mask = np.ones(len(new_cls_ids), dtype=bool)
-    for ind, (mask, cls_id) in enumerate(zip(torch.as_tensor(new_masks).to(device), new_cls_ids)):
+    torch_new_masks = torch.as_tensor(new_masks).to(device)
+    for ind, (mask, cls_id) in enumerate(zip(torch_new_masks, new_cls_ids)):
         if not cls_id in cls_id2neg_feats:
             continue
         mask = mask[None]
@@ -82,8 +87,8 @@ def remove_redundant_cells(predictor, ori_masks, ori_cls_ids, new_masks, new_cls
         #
         feat_sim = feat[None] @ cls_id2neg_feats[cls_id][: -2]
         posenc_sim = torch.sqrt(torch.sum((posenc[:, None] - cls_id2neg_feats[cls_id][-2 :]) ** 2, dim=0))
-        if (feat_sim.max() > 0.8) and (posenc_sim.min() < min(H, W) / 8):
-        # if (feat_sim.max() > 0.9):
+        # if (feat_sim.max() > 0.8) and (posenc_sim.min() < min(H, W) / 8):
+        if (feat_sim.max() > 0.6):
             valid_mask[ind] = False
     print('Remove', np.sum(~valid_mask), 'instances')
     return new_masks[valid_mask], new_cls_ids[valid_mask]
