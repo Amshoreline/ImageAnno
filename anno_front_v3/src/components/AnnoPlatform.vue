@@ -13,6 +13,7 @@
                 <button class='button' id='quit'>退出标注(q)</button>
                 <button class='button' id='save'>保存编辑(s)</button>
                 <button class='button' id='download_anno'>下载标注</button>
+                <button class='button' id='download_fg'>下载抠图</button>
             </div>
             <br>
             <div class="button_box">
@@ -1327,6 +1328,10 @@ export default {
                     // 下载标注文件，png格式
                     this.downloadAnno()
                     break
+                case 'download_fg':
+                    // 下载抠图，png格式
+                    this.downloadFG()
+                    break
                 case 'next':
                     // 切换到下一张图片
                     this.nextImage()
@@ -1584,6 +1589,32 @@ export default {
                 .finally(() => {})
         },
 
+        downloadFG() {
+            axios
+                .post(
+                    backend_address + '/get_fg_png',
+                    {
+                        'token': token,
+                        'collection_name': collection_name,
+                        'image_name': this.image_name,
+                    },
+                )
+                .then(response => {
+                    let encryptedBytes = response.data
+                    console.log(encryptedBytes)
+                    let link = document.createElement('a')
+                    link.href = 'data:image/png;base64,' + encryptedBytes.toString('base64')
+                    link.download = 'anno.png'
+                    document.body.appendChild(link)
+                    link.click()
+                    document.body.removeChild(link)
+                })
+                .catch(error => {
+                    console.log(error)
+                })
+                .finally(() => {})
+        },
+
 
         instruct() {
             alert(
@@ -1628,6 +1659,7 @@ export default {
             (document.getElementById('rename') as HTMLButtonElement).addEventListener('click', () => {this.operate('rename')});
             (document.getElementById('remove') as HTMLButtonElement).addEventListener('click', () => {this.operate('remove')});
             (document.getElementById('download_anno') as HTMLButtonElement).addEventListener('click', () => {this.downloadAnno()});
+            (document.getElementById('download_fg') as HTMLButtonElement).addEventListener('click', () => {this.downloadFG()});
             //
             (document.getElementById('next') as HTMLButtonElement).addEventListener('click', () => {this.operate('next')});
             (document.getElementById('prev') as HTMLButtonElement).addEventListener('click', () => {this.operate('prev')});

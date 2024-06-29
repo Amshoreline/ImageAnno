@@ -9,7 +9,8 @@
                 </a-col>
                 <a-col :span='6'></a-col>
             </a-row> -->
-            <Test />
+            <!-- Test /-->
+            <router-view></router-view>
         </div>
     </a-locale-provider>
 </template>

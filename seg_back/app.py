@@ -36,11 +36,6 @@ def hello_world():
     return send_from_directory('dist', 'index.html')
 
 
-@app.route('/test', methods = ['POST'])
-def test():
-    return 'Hello World!'
-
-
 @app.route('/get_collection_list', methods=['POST'])
 def get_collection_list():
     params = request.get_json(silent=True)
@@ -131,6 +126,44 @@ def get_anno_png():
     #
     img_byte_array = BytesIO()
     Image.fromarray(anno_mask).save(img_byte_array, format='PNG')
+    img_byte_array.seek(0)
+    return base64.b64encode(img_byte_array.getvalue()).decode('utf-8')
+
+
+@app.route('/get_fg_png', methods=['POST'])
+def get_fg_png():
+    params = request.get_json(silent=True)
+    user = token2user[params['token']]
+    #
+    collection_name = params['collection_name']
+    image_name = params['image_name']
+    # Get image, height and width
+    with open(f'data/{user}/{collection_name}/info.json', 'r') as reader:
+        image_list = eval(reader.read())
+    for item in image_list:
+        if item['image_name'] == image_name:
+            height, width = item['height'], item['width']
+    image_path = f'data/{user}/{collection_name}/images/{image_name}'
+    image = np.array(Image.open(image_path))
+    if image.shape[2] == 3:
+        image = np.concatenate([image, np.zeros((height, width, 1), dtype=np.uint8)], axis=2)
+    # Get json
+    json_name = image_name.replace('.jpg', '.json')
+    json_path = f'data/{user}/{collection_name}/jsons/{json_name}'
+    if not os.path.exists(json_path):
+        with open(json_path, 'w') as writer:
+            writer.write(str([]))
+    with open(json_path, 'r') as reader:
+        contours = eval(reader.read())
+    # Convert json to mask
+    anno_mask = np.zeros((height, width), dtype=np.uint8)
+    for contour in contours:
+        contour = np.round([[item['x'], item['y']] for item in contour['path']]).astype(np.int32)
+        cv2.fillPoly(anno_mask, [contour], 255)
+    image[..., 3] = anno_mask
+    #
+    img_byte_array = BytesIO()
+    Image.fromarray(image).save(img_byte_array, format='PNG')
     img_byte_array.seek(0)
     return base64.b64encode(img_byte_array.getvalue()).decode('utf-8')
 

@@ -39,6 +39,7 @@
                 <option value='vit_b' selected>SAM-B</option>
                 <!-- <option value='vit-t'>SAM-T</option> -->
                 <option value='med-vit_b'>MedSAM-B</option>
+                <option value='uni'>UNI</option>
             </select>
             <br>
             <label class='text'>选择序列</label>
@@ -496,7 +497,9 @@ export default class Test extends Vue {
     }
 
     drawImageAnno() {
+        console.log('drawImageAnno')
         this.clearCanvas()
+        console.log('drawImage')
         this.context.drawImage(
             this.image,
             this.region_info['xmin'], this.region_info['ymin'],
@@ -504,6 +507,7 @@ export default class Test extends Vue {
             0, 0, this.region_info['width'] * this.region_info['ratio'],
             this.region_info['height'] * this.region_info['ratio'],
         )
+        console.log('draw annotations')
         this.resetStyle()
         for (let i = 0; i < this.annotations.length; i++) {
             // 画点
