@@ -216,7 +216,8 @@ export default {
             selecting: false,          // selecting a region
             prompt_mode: false,  // SAM的point prompt
             //
-            point_size: 1,          // size of a point
+            base_point_size: 4,     // base size of a point
+            point_size: 0,          // size of a point
             receptive_ratio: 2,     // ratio of receptive field
             line_width: 1,          // size of line
             // style_list: ['#D79B00', '#6C8EBF', '#82B366', '#B85450', '#9673A6', '#FFFF88']
@@ -347,6 +348,7 @@ export default {
                     this_bg.width / (this.image.width),
                 ),
             }
+            this.point_size = this.base_point_size / this.region_info['ratio']
             console.log('Reset region')
             console.log('bg.height = ', this_bg.height, '; bg.width = ', this_bg.width)
             console.log('image.height = ', this.image.height, '; image.width = ', this.image.width)
@@ -1099,6 +1101,7 @@ export default {
                             this_bg.width / this.region_info['width'],
                             this_bg.height / this.region_info['height'],
                         )
+                        this.point_size = this.base_point_size / this.region_info['ratio']
                         this.maskAllModes()
                     } else if (this.draw_bbox_mode) {
                         this.bbox['xmin'] = xmin

@@ -11,7 +11,7 @@ import PIL.Image as Image
 from io import BytesIO
 import base64
 #
-from flask import Flask, request, send_from_directory
+from flask import Flask, request, send_from_directory, send_file
 from flask_cors import CORS
 app = Flask(__name__, static_folder='/root/ImageAnno/seg_back/dist', static_url_path='')
 CORS(app)
@@ -485,8 +485,8 @@ def rename_image():
     new_image_path = f'data/{user}/{collection_name}/images/{new_name}'
     os.system(f'mv {ori_image_path} {new_image_path}')
     # Update json file
-    ori_json_path = ori_image_path.replace('/images/', '/jsons/').replace('.jpg', 'json')
-    new_json_path = new_image_path.replace('/images/', '/jsons/').replace('.jpg', 'json')
+    ori_json_path = ori_image_path.replace('/images/', '/jsons/').replace('.jpg', '.json')
+    new_json_path = new_image_path.replace('/images/', '/jsons/').replace('.jpg', '.json')
     os.system(f'mv {ori_json_path} {new_json_path}')
     return new_name.encode()
 
@@ -551,6 +551,16 @@ def calc_volume():
         for ind, (label, area) in enumerate(zip(labels, areas)):
             res += f'\n{ind}/{len(labels)}      {label}              {area:.2f}'
         return res.encode()
+
+
+# @app.route('/get_poster_1')
+# def get_poster_1():
+#     return send_file('ICME_BACON_poster.pdf', as_attachment=True)
+
+
+# @app.route('/get_poster_2')
+# def get_poster_2():
+#     return send_file('ICME_poster_pry.pdf', as_attachment=True)
 
 
 if __name__ == '__main__':
