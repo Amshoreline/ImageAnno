@@ -1,0 +1,10 @@
+json*
+dist/
+dist_old/
+data/
+ckpts/
+*__pycache__*
+*.pyc
+data_for_train*
+dist_history
+*.zip
